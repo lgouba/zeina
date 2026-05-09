@@ -77,14 +77,14 @@ SELECT * FROM (VALUES
     ('55555555-5555-5555-5555-000000000003'::uuid, '44444444-4444-4444-4444-000000000001'::uuid, 'actuator'::device_type,    'V-Relay',       'relay-light-01',   'Lumière open space',  'Éclairage',     'dev_relay_light_01_acme', (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
 
     -- meeting-room-1
-    ('55555555-5555-5555-5555-000000000004'::uuid, '44444444-4444-4444-4444-000000000002'::uuid, 'environment'::device_type, 'V-Env-3M',     'env-02',           'Capteur ambiance',    'Environnement', 'dev_env_02_acme',          (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
+    ('55555555-5555-5555-5555-000000000004'::uuid, '44444444-4444-4444-4444-000000000002'::uuid, 'environment'::device_type, 'V-Env-4M',     'env-02',           'Capteur ambiance',    'Environnement', 'dev_env_02_acme',          (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
     ('55555555-5555-5555-5555-000000000005'::uuid, '44444444-4444-4444-4444-000000000002'::uuid, 'presence'::device_type,    'V-PIR',         'pir-02',           'Détecteur présence',  'Mouvement',     'dev_pir_02_acme',         (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
 
     -- tableau-elec
     ('55555555-5555-5555-5555-000000000006'::uuid, '44444444-4444-4444-4444-000000000003'::uuid, 'linky'::device_type,        'V-Linky',      'linky-01',         'Compteur principal',  'Énergie',       'dev_linky_01_acme',       (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
     ('55555555-5555-5555-5555-000000000007'::uuid, '44444444-4444-4444-4444-000000000003'::uuid, 'actuator'::device_type,    'V-Relay',       'relay-clim-01',    'Climatisation',       'Climatisation', 'dev_relay_clim_01_acme',   (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
     ('55555555-5555-5555-5555-000000000008'::uuid, '44444444-4444-4444-4444-000000000003'::uuid, 'actuator'::device_type,    'V-Relay',       'relay-light-02',   'Lumière tableau',     'Éclairage',     'dev_relay_light_02_acme',  (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
-    ('55555555-5555-5555-5555-000000000009'::uuid, '44444444-4444-4444-4444-000000000003'::uuid, 'environment'::device_type, 'V-Env-1M',      'env-03',           'Sonde T° tableau',    'Environnement', 'dev_env_03_acme',          (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
+    ('55555555-5555-5555-5555-000000000009'::uuid, '44444444-4444-4444-4444-000000000003'::uuid, 'environment'::device_type, 'V-Env-4M',      'env-03',           'Sonde T° tableau',    'Environnement', 'dev_env_03_acme',          (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb),
     ('55555555-5555-5555-5555-000000000010'::uuid, '44444444-4444-4444-4444-000000000003'::uuid, 'presence'::device_type,    'V-PIR',         'pir-03',           'Présence tableau',    'Mouvement',     'dev_pir_03_acme',          (SELECT h FROM placeholder_hash), 'online'::device_status, now(), '{}'::jsonb)
 ) AS v(id, zone_id, type, model, slug, name, category, mqtt_id, mqtt_password_hash, status, installed_at, metadata)
 ON CONFLICT (zone_id, slug) DO UPDATE SET
@@ -117,3 +117,13 @@ INSERT INTO measurements_metadata (device_id, measurement, unit, min_value, max_
     ('55555555-5555-5555-5555-000000000006', 'urms',  'volt',     200.0,   260.0, 'Tension RMS'),
     ('55555555-5555-5555-5555-000000000006', 'base',  'watt-hour',  0.0, 1.0e12, 'Index énergie cumulée')
 ON CONFLICT (device_id, measurement) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Lier les devices à leur entrée du catalogue device_models par code (pour
+-- que le filtre "Modèle" du formulaire de règle / création de widget marche).
+-- ---------------------------------------------------------------------------
+UPDATE devices d
+SET    model_id = m.id
+FROM   device_models m
+WHERE  m.code = d.model
+  AND  d.model_id IS NULL;
