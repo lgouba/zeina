@@ -21,7 +21,34 @@ export class HttpError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+// Refresh en cours partagé entre tous les appels concurrents qui se sont pris
+// un 401 — on ne rafraîchit qu'une seule fois.
+let refreshing: Promise<string | null> | null = null;
+
+async function tryRefresh(): Promise<string | null> {
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    try {
+      const r = await fetch(`${API_URL}/v1/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!r.ok) return null;
+      const json = (await r.json()) as { access_token?: string };
+      if (!json.access_token) return null;
+      currentToken = json.access_token;
+      return json.access_token;
+    } catch {
+      return null;
+    } finally {
+      // Permet un nouveau refresh la prochaine fois (TTL passera de nouveau).
+      setTimeout(() => { refreshing = null; }, 0);
+    }
+  })();
+  return refreshing;
+}
+
+async function request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (currentToken) headers["Authorization"] = `Bearer ${currentToken}`;
 
@@ -31,6 +58,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     credentials: "include", // pour le cookie refresh
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+
+  // Auto-refresh sur 401 (sauf endpoints d'auth eux-mêmes pour éviter les boucles).
+  if (res.status === 401 && !retried && !path.startsWith("/v1/auth/")) {
+    const newTok = await tryRefresh();
+    if (newTok) {
+      return request<T>(method, path, body, true);
+    }
+  }
 
   if (res.status === 204) return undefined as T;
 
