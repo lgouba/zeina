@@ -337,13 +337,31 @@ func (h *SitesHandler) Create(c echo.Context) error {
 		return apperr.Wrap(apperr.KindInternal, "insert site", err)
 	}
 
-	// Récupère le rôle système "Responsable de site" du tenant — il est
-	// seedé par la migration 0008 pour chaque tenant existant.
+	// Crée les 2 rôles système site-scope ("Responsable de site" et "Invité")
+	// pour ce nouveau site. Pattern repris de la migration 0016.
+	if _, err := tx.Exec(c.Request().Context(), `
+		INSERT INTO roles (tenant_id, site_id, name, description, permissions, is_system)
+		VALUES
+		    ($1, $2, 'Responsable de site',
+		     'Accès complet au site : dashboards, équipements, règles, membres.',
+		     jsonb_build_object('dashboard','write','devices','write','rules','write','members','write'),
+		     true),
+		    ($1, $2, 'Invité',
+		     'Accès en lecture seule sur les dashboards et équipements.',
+		     jsonb_build_object('dashboard','read','devices','read','rules','none','members','none'),
+		     true)
+		ON CONFLICT DO NOTHING`,
+		tid, s.ID,
+	); err != nil {
+		return apperr.Wrap(apperr.KindInternal, "seed system roles", err)
+	}
+
+	// Récupère le rôle "Responsable de site" qu'on vient de créer pour ce site.
 	var roleID uuid.UUID
 	if err := tx.QueryRow(c.Request().Context(),
-		`SELECT id FROM roles WHERE tenant_id = $1 AND name = 'Responsable de site' LIMIT 1`,
-		tid).Scan(&roleID); err != nil {
-		return apperr.Wrap(apperr.KindInternal, "fetch system role", err)
+		`SELECT id FROM roles WHERE tenant_id = $1 AND site_id = $2 AND name = 'Responsable de site' LIMIT 1`,
+		tid, s.ID).Scan(&roleID); err != nil {
+		return apperr.Wrap(apperr.KindInternal, "fetch new role", err)
 	}
 
 	// Auto-add le créateur comme membre "Responsable de site". Si le user

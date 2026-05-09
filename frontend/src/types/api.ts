@@ -47,6 +47,8 @@ export interface Role {
   description?: string | null;
   permissions: PermissionSet;
   is_system: boolean;
+  /** null = rôle tenant-wide (réutilisable sur tous les sites), sinon scope-site */
+  site_id?: string | null;
   created_at: string;
   updated_at: string;
 }

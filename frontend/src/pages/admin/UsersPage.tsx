@@ -314,21 +314,32 @@ function UserModal({ mode, user: existing, onClose, onSaved, canSetSuperadmin }:
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
 
+  // Charge la liste des sites une fois.
   useEffect(() => {
-    Promise.all([
-      api.get<Site[]>("/v1/sites").catch(() => []),
-      api.get<Role[]>("/v1/roles").catch(() => []),
-    ]).then(([s, r]) => {
-      setSites(s);
-      setRoles(r);
-      // Préselection : "Invité" si dispo (rôle système le moins permissif)
-      if (mode === "create" && !roleId) {
-        const guest = r.find((x) => x.name === "Invité") || r[0];
-        if (guest) setRoleId(guest.id);
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    api.get<Site[]>("/v1/sites").then(setSites).catch(() => {});
   }, []);
+
+  // Recharge les rôles à chaque changement de site (filtre site_id côté API
+  // → on ne propose que les rôles applicables à ce site).
+  useEffect(() => {
+    // Pas de site choisi → pas besoin du dropdown rôle (sera caché).
+    if (!siteSelection || siteSelection === SITE_ALL) {
+      setRoles([]);
+      return;
+    }
+    api.get<Role[]>(`/v1/roles?site_id=${encodeURIComponent(siteSelection)}`)
+      .then((r) => {
+        setRoles(r);
+        if (mode === "create") {
+          // Préselection : "Invité" (rôle système le moins permissif), sinon
+          // le premier de la liste.
+          const guest = r.find((x) => x.name === "Invité") || r[0];
+          setRoleId(guest ? guest.id : "");
+        }
+      })
+      .catch(() => setRoles([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteSelection]);
 
   // Quand on est en édition d'un membre, on ne sait pas a priori sur quel
   // site il est affecté (le picker simple n'est pas idéal pour le multi-site).

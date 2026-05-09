@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 
@@ -43,6 +44,7 @@ type roleOut struct {
 	Description *string            `json:"description,omitempty"`
 	Permissions rbac.PermissionSet `json:"permissions"`
 	IsSystem    bool               `json:"is_system"`
+	SiteID      *uuid.UUID         `json:"site_id,omitempty"` // null = rôle tenant-wide
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
 }
@@ -65,13 +67,45 @@ func (h *RolesHandler) Features(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
+// List retourne les rôles du tenant.
+//
+// Sans param : tous les rôles (tenant-wide + tous les rôles site-scope).
+// Avec ?site_id=<uuid> : seulement les rôles applicables à ce site, soit :
+//   - rôles tenant-wide (site_id IS NULL)
+//   - rôles spécifiques à ce site (site_id = <uuid>)
+//
+// Le frontend peut passer ?site_id pour peupler le dropdown du UserModal
+// quand un site est sélectionné.
 func (h *RolesHandler) List(c echo.Context) error {
 	tid, _ := uuid.Parse(callerClaims(c).TenantID)
-	const q = `
-		SELECT id, name, description, permissions, is_system, created_at, updated_at
-		FROM roles WHERE tenant_id = $1 ORDER BY is_system DESC, name
-	`
-	rows, err := h.pool.Query(c.Request().Context(), q, tid)
+
+	siteParam := c.QueryParam("site_id")
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if siteParam != "" {
+		sid, perr := uuid.Parse(siteParam)
+		if perr != nil {
+			return apperr.Validation("invalid site_id")
+		}
+		const q = `
+			SELECT id, name, description, permissions, is_system, site_id, created_at, updated_at
+			FROM   roles
+			WHERE  tenant_id = $1
+			  AND  (site_id IS NULL OR site_id = $2)
+			ORDER BY is_system DESC, name
+		`
+		rows, err = h.pool.Query(c.Request().Context(), q, tid, sid)
+	} else {
+		const q = `
+			SELECT id, name, description, permissions, is_system, site_id, created_at, updated_at
+			FROM   roles
+			WHERE  tenant_id = $1
+			ORDER BY is_system DESC, name
+		`
+		rows, err = h.pool.Query(c.Request().Context(), q, tid)
+	}
 	if err != nil {
 		return apperr.Wrap(apperr.KindInternal, "list roles", err)
 	}
@@ -80,7 +114,7 @@ func (h *RolesHandler) List(c echo.Context) error {
 	for rows.Next() {
 		var r roleOut
 		var permsRaw []byte
-		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &permsRaw, &r.IsSystem, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &permsRaw, &r.IsSystem, &r.SiteID, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return apperr.Wrap(apperr.KindInternal, "scan role", err)
 		}
 		r.Permissions = rbac.ParsePermissions(permsRaw)
@@ -93,6 +127,9 @@ type createRoleReq struct {
 	Name        string             `json:"name"`
 	Description *string            `json:"description,omitempty"`
 	Permissions rbac.PermissionSet `json:"permissions"`
+	// SiteID optionnel : si fourni, le rôle est scope-site (n'apparaît que pour
+	// ce site dans les dropdowns) ; sinon il est tenant-wide.
+	SiteID *uuid.UUID `json:"site_id,omitempty"`
 }
 
 func (h *RolesHandler) Create(c echo.Context) error {
@@ -111,14 +148,14 @@ func (h *RolesHandler) Create(c echo.Context) error {
 
 	permsJSON, _ := json.Marshal(req.Permissions)
 	const q = `
-		INSERT INTO roles (tenant_id, name, description, permissions, is_system)
-		VALUES ($1, $2, $3, $4, false)
-		RETURNING id, name, description, permissions, is_system, created_at, updated_at
+		INSERT INTO roles (tenant_id, site_id, name, description, permissions, is_system)
+		VALUES ($1, $2, $3, $4, $5, false)
+		RETURNING id, name, description, permissions, is_system, site_id, created_at, updated_at
 	`
 	var r roleOut
 	var permsRaw []byte
-	if err := h.pool.QueryRow(c.Request().Context(), q, tid, req.Name, req.Description, permsJSON).
-		Scan(&r.ID, &r.Name, &r.Description, &permsRaw, &r.IsSystem, &r.CreatedAt, &r.UpdatedAt); err != nil {
+	if err := h.pool.QueryRow(c.Request().Context(), q, tid, req.SiteID, req.Name, req.Description, permsJSON).
+		Scan(&r.ID, &r.Name, &r.Description, &permsRaw, &r.IsSystem, &r.SiteID, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
 			return apperr.Validation("a role with this name already exists")
 		}
@@ -178,12 +215,12 @@ func (h *RolesHandler) Update(c echo.Context) error {
 			permissions = COALESCE($5, permissions),
 			updated_at  = now()
 		WHERE id = $1 AND tenant_id = $2
-		RETURNING id, name, description, permissions, is_system, created_at, updated_at
+		RETURNING id, name, description, permissions, is_system, site_id, created_at, updated_at
 	`
 	var r roleOut
 	var permsRaw []byte
 	if err := h.pool.QueryRow(c.Request().Context(), q, rid, tid, req.Name, req.Description, permsJSON).
-		Scan(&r.ID, &r.Name, &r.Description, &permsRaw, &r.IsSystem, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		Scan(&r.ID, &r.Name, &r.Description, &permsRaw, &r.IsSystem, &r.SiteID, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		if isUniqueViolation(err) {
 			return apperr.Validation("a role with this name already exists")
 		}

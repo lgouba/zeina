@@ -188,8 +188,12 @@ paths:
       tags: [Sites]
       summary: Créer un site (owner / superadmin)
       description: |
-        Crée un site et ajoute automatiquement le créateur comme **Responsable de site**
-        dans `site_members`. Opération transactionnelle.
+        Crée un site et :
+        - crée automatiquement les 2 rôles système site-scope :
+          **Responsable de site** (write partout) et **Invité** (read sur dashboards/devices)
+        - ajoute le créateur comme membre avec le rôle **Responsable de site**
+
+        Opération transactionnelle — si une étape échoue, tout est rollback.
       requestBody:
         required: true
         content:
@@ -368,6 +372,17 @@ paths:
     get:
       tags: [Roles]
       summary: Liste des rôles du tenant
+      description: |
+        Sans paramètre : tous les rôles (tenant-wide + tous les rôles site-scope).
+        Avec `?site_id=<uuid>` : seulement les rôles applicables à ce site, soit
+        les rôles tenant-wide (`site_id` null) + ceux propres au site demandé.
+        À utiliser pour peupler le dropdown rôle d'un user lié à un site.
+      parameters:
+        - in: query
+          name: site_id
+          schema: { type: string, format: uuid }
+          required: false
+          description: Filtre — ne retourner que les rôles applicables à ce site.
       responses:
         "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Role" } } } } }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -1495,6 +1510,7 @@ components:
         description: { type: string, nullable: true }
         permissions: { $ref: "#/components/schemas/PermissionSet" }
         is_system:   { type: boolean }
+        site_id:     { type: string, format: uuid, nullable: true, description: "null = rôle tenant-wide réutilisable sur tous les sites ; sinon scope-site" }
         created_at:  { type: string, format: date-time }
         updated_at:  { type: string, format: date-time }
 
@@ -1505,6 +1521,7 @@ components:
         name:        { type: string }
         description: { type: string, nullable: true }
         permissions: { $ref: "#/components/schemas/PermissionSet" }
+        site_id:     { type: string, format: uuid, nullable: true, description: "Si fourni, rôle scope-site (visible uniquement pour ce site)" }
 
     UpdateRoleReq:
       type: object
