@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, UserCog, Trash2, Pencil, KeyRound, X, Crown, Shield, Copy, CheckCheck, Building2 } from "lucide-react";
+import { Plus, UserCog, Trash2, Pencil, KeyRound, X, Crown, Shield, Building2, Mail, Send, CheckCircle2, Clock, Ban } from "lucide-react";
 import { api, HttpError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { Help } from "../../components/Tooltip";
@@ -65,6 +65,7 @@ export function UsersPage() {
                 <th className="text-left px-4 py-2">Email</th>
                 <th className="text-left px-4 py-2">Nom</th>
                 <th className="text-left px-4 py-2">Rôle tenant</th>
+                <th className="text-left px-4 py-2">Statut</th>
                 <th className="text-left px-4 py-2">Dernière connexion</th>
                 <th className="px-2"></th>
               </tr>
@@ -91,15 +92,20 @@ export function UsersPage() {
                   <td className="px-4 py-2 text-slate-600 dark:text-slate-300">
                     {u.tenant_role === "owner" ? "Owner" : "Membre"}
                   </td>
+                  <td className="px-4 py-2"><StatusBadge status={u.status} /></td>
                   <td className="px-4 py-2 text-xs text-slate-500">
                     {u.last_login_at ? new Date(u.last_login_at).toLocaleString("fr-FR") : "Jamais"}
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex items-center gap-1 justify-end">
-                      <button onClick={() => setResetting(u)} title="Réinitialiser le mot de passe"
-                        className="p-1.5 rounded-md text-slate-500 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800">
-                        <KeyRound className="h-4 w-4" />
-                      </button>
+                      {u.status === "pending" ? (
+                        <ResendActivationButton user={u} onSent={reload} />
+                      ) : (
+                        <button onClick={() => setResetting(u)} title="Envoyer un mail de réinitialisation"
+                          className="p-1.5 rounded-md text-slate-500 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+                          <KeyRound className="h-4 w-4" />
+                        </button>
+                      )}
                       <button onClick={() => setEditing(u)} title="Modifier"
                         className="p-1.5 rounded-md text-slate-500 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800">
                         <Pencil className="h-4 w-4" />
@@ -125,6 +131,49 @@ export function UsersPage() {
   );
 }
 
+function StatusBadge({ status }: { status: UserListItem["status"] }) {
+  switch (status) {
+    case "active":
+      return <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+        <CheckCircle2 className="h-3 w-3" /> Actif
+      </span>;
+    case "pending":
+      return <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300">
+        <Clock className="h-3 w-3" /> En attente
+      </span>;
+    case "disabled":
+      return <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-slate-500/15 text-slate-600 dark:text-slate-400">
+        <Ban className="h-3 w-3" /> Désactivé
+      </span>;
+  }
+}
+
+function ResendActivationButton({ user, onSent }: { user: UserListItem; onSent: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  async function send() {
+    if (busy) return;
+    if (!confirm(`Renvoyer le code d'activation à ${user.email} ?`)) return;
+    setBusy(true);
+    try {
+      await api.post(`/v1/users/${user.id}/resend-activation`);
+      setDone(true);
+      setTimeout(() => setDone(false), 2000);
+      onSent();
+    } catch (e) {
+      alert(e instanceof HttpError ? e.payload.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button onClick={send} disabled={busy} title="Renvoyer le code d'activation par email"
+      className="p-1.5 rounded-md text-slate-500 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">
+      {done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Send className="h-4 w-4" />}
+    </button>
+  );
+}
+
 // --------------------------------------------------------------------------
 
 function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
@@ -134,8 +183,6 @@ function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
   const [fullName, setFullName] = useState("");
   const [tenantRole, setTenantRole] = useState<"owner" | "member">("member");
   const [isSuperadmin, setIsSuperadmin] = useState(false);
-  const [password, setPassword] = useState("");
-  const [tempPwd, setTempPwd] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -153,9 +200,6 @@ function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
     ]).then(([s, r]) => {
       setSites(s);
       setRoles(r);
-      // Préselectionne "Invité" sur le 1er site si la config est typique
-      // (1 seul site, rôle par défaut "Invité" trouvé). Évite les ajustements
-      // pour les cas multi-sites.
       const invite = r.find((x) => x.name === "Invité");
       if (s.length === 1 && invite) {
         setAssignments({ [s[0].id]: invite.id });
@@ -163,7 +207,6 @@ function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
     });
   }, []);
 
-  // Affectations pertinentes uniquement pour les membres simples non-super.
   const showAssignments = tenantRole === "member" && !isSuperadmin;
 
   async function submit(e: FormEvent) {
@@ -171,10 +214,9 @@ function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
     setError(null); setWarning(null);
     setSubmitting(true);
     try {
-      const r = await api.post<{ user: { id: string }; temporary_password?: string }>("/v1/users", {
+      const r = await api.post<{ user: { id: string }; activation_sent?: boolean }>("/v1/users", {
         email, full_name: fullName || undefined,
         tenant_role: tenantRole, is_superadmin: isSuperadmin,
-        password: password || undefined,
       });
 
       // Affectations en série (peu nombreuses ; permet d'agréger les erreurs)
@@ -193,13 +235,13 @@ function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
       }
       if (failures.length > 0) {
         setWarning(`Utilisateur créé mais affectation(s) en échec : ${failures.join(", ")}`);
+        return;
       }
-
-      if (r.temporary_password) {
-        setTempPwd(r.temporary_password);
-      } else if (failures.length === 0) {
-        onSaved();
+      if (r.activation_sent === false) {
+        setWarning(`Utilisateur créé mais l'envoi du mail d'activation a échoué. Utilise « Renvoyer le code » dans la liste.`);
+        return;
       }
+      onSaved();
     } catch (e) {
       setError(e instanceof HttpError ? e.payload.message : "Erreur");
     } finally {
@@ -209,10 +251,12 @@ function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
 
   return (
     <Modal title="Nouvel utilisateur" onClose={onClose}>
-      {tempPwd ? (
-        <TempPasswordPanel email={email} password={tempPwd} onClose={onSaved} />
-      ) : (
-        <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="space-y-4">
+        <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300 bg-brand-500/10 border border-brand-500/20 rounded-md p-3">
+          <Mail className="h-4 w-4 text-brand-500 shrink-0 mt-0.5" />
+          <span>Un email d'activation contenant un code à 6 chiffres sera envoyé à l'utilisateur. Tant qu'il n'aura pas défini son mot de passe, son statut sera <strong>En attente</strong>.</span>
+        </div>
+
           <Field label="Email *">
             <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required
               placeholder="utilisateur@acme.com" className={inputCls} />
@@ -243,10 +287,6 @@ function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
               </div>
             </label>
           )}
-          <Field label="Mot de passe" hint="Laisse vide pour générer un mot de passe temporaire affiché à la création.">
-            <input value={password} onChange={(e) => setPassword(e.target.value)} type="password"
-              placeholder="optionnel" className={inputCls} />
-          </Field>
 
           {/* Affectations sur les sites — uniquement pour les membres simples */}
           {showAssignments && sites.length > 0 && (
@@ -298,8 +338,7 @@ function CreateUserModal({ onClose, onSaved, canSetSuperadmin }: {
               {submitting ? "Création…" : "Créer l'utilisateur"}
             </button>
           </div>
-        </form>
-      )}
+      </form>
     </Modal>
   );
 }
@@ -310,6 +349,7 @@ function EditUserModal({ user, onClose, onSaved, canSetSuperadmin }: {
   const [fullName, setFullName] = useState(user.full_name || "");
   const [tenantRole, setTenantRole] = useState<"owner" | "member">(user.tenant_role);
   const [isSuperadmin, setIsSuperadmin] = useState(user.is_superadmin);
+  const [status, setStatus] = useState<UserListItem["status"]>(user.status);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -322,6 +362,7 @@ function EditUserModal({ user, onClose, onSaved, canSetSuperadmin }: {
         full_name: fullName || null,
         tenant_role: tenantRole,
         is_superadmin: canSetSuperadmin ? isSuperadmin : undefined,
+        status: status !== user.status ? status : undefined,
       });
       onSaved();
     } catch (e) {
@@ -341,6 +382,13 @@ function EditUserModal({ user, onClose, onSaved, canSetSuperadmin }: {
           <select value={tenantRole} onChange={(e) => setTenantRole(e.target.value as "owner" | "member")} className={inputCls}>
             <option value="member">Membre</option>
             <option value="owner">Owner du tenant</option>
+          </select>
+        </Field>
+        <Field label="Statut" hint="Désactiver bloque la connexion sans supprimer le compte.">
+          <select value={status} onChange={(e) => setStatus(e.target.value as UserListItem["status"])} className={inputCls}>
+            <option value="active">Actif</option>
+            <option value="pending">En attente</option>
+            <option value="disabled">Désactivé</option>
           </select>
         </Field>
         {canSetSuperadmin && (
@@ -366,23 +414,19 @@ function EditUserModal({ user, onClose, onSaved, canSetSuperadmin }: {
 }
 
 function ResetPasswordModal({ user, onClose }: { user: UserListItem; onClose: () => void }) {
-  const [password, setPassword] = useState("");
-  const [tempPwd, setTempPwd] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setSubmitting(true);
-    setError(null);
+    setSubmitting(true); setError(null);
     try {
-      const r = await api.post<{ temporary_password?: string }>(`/v1/users/${user.id}/reset-password`, {
-        password: password || undefined,
-      });
-      if (r.temporary_password) {
-        setTempPwd(r.temporary_password);
+      const r = await api.post<{ email_sent?: boolean }>(`/v1/users/${user.id}/reset-password`);
+      if (r.email_sent) {
+        setSent(true);
       } else {
-        onClose();
+        setError("L'envoi de l'email a échoué. Vérifie la configuration SMTP côté serveur.");
       }
     } catch (e) {
       setError(e instanceof HttpError ? e.payload.message : "Erreur");
@@ -390,20 +434,35 @@ function ResetPasswordModal({ user, onClose }: { user: UserListItem; onClose: ()
       setSubmitting(false);
     }
   }
+
   return (
-    <Modal title={`Réinitialiser le mot de passe — ${user.email}`} onClose={onClose}>
-      {tempPwd ? (
-        <TempPasswordPanel email={user.email} password={tempPwd} onClose={onClose} />
+    <Modal title={`Réinitialiser le mot de passe`} onClose={onClose}>
+      {sent ? (
+        <div className="space-y-4">
+          <div className="flex items-start gap-2 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-medium text-emerald-800 dark:text-emerald-200">Email envoyé</p>
+              <p className="text-emerald-700 dark:text-emerald-300 mt-1">
+                Un email contenant un code de réinitialisation a été envoyé à <strong>{user.email}</strong>. Le code expire dans 15 minutes.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end pt-2 border-t border-slate-200 dark:border-slate-800">
+            <button onClick={onClose} className="px-4 py-2 text-sm rounded-md bg-brand-500 hover:bg-brand-400 text-white">Terminé</button>
+          </div>
+        </div>
       ) : (
         <form onSubmit={submit} className="space-y-4">
-          <Field label="Nouveau mot de passe" hint="Vide = mot de passe temporaire généré.">
-            <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" className={inputCls} placeholder="optionnel" />
-          </Field>
+          <div className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300 bg-brand-500/10 border border-brand-500/20 rounded-md p-3">
+            <Mail className="h-4 w-4 text-brand-500 shrink-0 mt-0.5" />
+            <span>Un email contenant un code à 6 chiffres sera envoyé à <strong>{user.email}</strong>. L'utilisateur pourra alors choisir un nouveau mot de passe.</span>
+          </div>
           {error && <div className="text-sm text-red-500 bg-red-500/10 p-2 rounded">{error}</div>}
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
             <button type="button" onClick={onClose} className="px-3 py-2 text-sm rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-white">Annuler</button>
             <button type="submit" disabled={submitting} className="px-4 py-2 text-sm rounded-md bg-brand-500 hover:bg-brand-400 text-white disabled:opacity-50">
-              {submitting ? "…" : "Réinitialiser"}
+              {submitting ? "Envoi…" : "Envoyer l'email"}
             </button>
           </div>
         </form>
@@ -413,32 +472,6 @@ function ResetPasswordModal({ user, onClose }: { user: UserListItem; onClose: ()
 }
 
 // --- helpers ---------------------------------------------------------------
-
-function TempPasswordPanel({ email, password, onClose }: { email: string; password: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="space-y-4">
-      <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30">
-        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">⚠️ Mot de passe temporaire</p>
-        <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-          Ce mot de passe ne sera plus affiché. Communique-le à <strong>{email}</strong> par un canal sûr.
-        </p>
-      </div>
-      <div className="flex items-center gap-2 p-3 rounded-md bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-        <code className="flex-1 font-mono text-sm select-all">{password}</code>
-        <button onClick={() => { navigator.clipboard.writeText(password); setCopied(true); }}
-          className="p-1.5 rounded-md text-slate-500 hover:text-brand-500 hover:bg-white dark:hover:bg-slate-800">
-          {copied ? <CheckCheck className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-        </button>
-      </div>
-      <div className="flex justify-end pt-2 border-t border-slate-200 dark:border-slate-800">
-        <button onClick={onClose} className="px-4 py-2 text-sm rounded-md bg-brand-500 hover:bg-brand-400 text-white">
-          Terminé
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (

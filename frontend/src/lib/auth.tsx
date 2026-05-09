@@ -13,6 +13,8 @@ interface AuthState {
   logout: () => Promise<void>;
   /** Re-fetch /me — à appeler après ajout/suppression de membre. */
   refreshMe: () => Promise<void>;
+  /** Accepter une session déjà obtenue (ex: après set-password). */
+  acceptSession: (token: string, user: User, expiresAt: string) => Promise<void>;
 }
 
 const Ctx = createContext<AuthState | null>(null);
@@ -101,9 +103,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveSession(null);
   }, []);
 
+  const acceptSession = useCallback(async (tok: string, u: User, expiresAt: string) => {
+    setUser(u);
+    setToken(tok);
+    setAuthToken(tok);
+    saveSession({ token: tok, user: u, expiresAt });
+    try {
+      const me = await api.get<MeResponse>("/v1/auth/me");
+      setSites(me.sites);
+      saveSession({ token: tok, user: me.user, expiresAt, sites: me.sites });
+    } catch { /* on garde au moins le user */ }
+  }, []);
+
   const value = useMemo<AuthState>(
-    () => ({ user, token, loading, sites, login, logout, refreshMe: fetchMe }),
-    [user, token, loading, sites, login, logout, fetchMe],
+    () => ({ user, token, loading, sites, login, logout, refreshMe: fetchMe, acceptSession }),
+    [user, token, loading, sites, login, logout, fetchMe, acceptSession],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

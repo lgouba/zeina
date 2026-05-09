@@ -92,6 +92,88 @@ paths:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/MeResp" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /v1/auth/verify-code:
+    post:
+      tags: [Auth]
+      summary: Vérifier un code d'activation 6 chiffres
+      description: |
+        Étape 1 du flow d'activation (première connexion / mot de passe oublié).
+        Si le code est valide, retourne un nonce JWT court (5 min) à passer à
+        `/v1/auth/set-password`. En cas d'échec : status 401 (message générique
+        anti-énumération).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, purpose]
+              properties:
+                email:   { type: string, format: email }
+                code:    { type: string, minLength: 6, maxLength: 6, example: "042817" }
+                purpose: { type: string, enum: [first_login, password_reset] }
+      responses:
+        "200":
+          description: Code valide
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nonce:      { type: string }
+                  expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/auth/set-password:
+    post:
+      tags: [Auth]
+      summary: Définir un nouveau mot de passe (étape 2)
+      description: |
+        Étape 2 du flow d'activation. Reçoit le nonce de `verify-code` + le
+        nouveau mot de passe. Marque le user `active`, hashe et stocke le mot
+        de passe, puis retourne un access_token + cookie refresh comme un
+        `/login` normal (auto-login).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nonce, password]
+              properties:
+                nonce:    { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResp" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Envoyer un code de réinitialisation par email
+      description: |
+        Public — n'expose pas l'existence d'un compte (retourne toujours
+        `sent: true`). Si l'email correspond à un compte actif, un mail avec
+        un code 6 chiffres expirant en 15 min est envoyé.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Toujours OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent: { type: boolean, example: true }
+
   # ---------------------------------------------------------------------------
   # SITES
   # ---------------------------------------------------------------------------
@@ -194,7 +276,13 @@ paths:
     post:
       tags: [Users]
       summary: Créer un utilisateur
-      description: Si `password` est vide, un mot de passe temporaire est généré et retourné.
+      description: |
+        Mode normal : `password` vide → user créé en `pending`, un mail
+        d'activation contenant un code 6 chiffres est envoyé. La réponse
+        contient `activation_sent: true` si le mail est parti.
+
+        Mode legacy (scripts d'admin) : `password` fourni → user `active`
+        directement, pas de mail.
       requestBody:
         required: true
         content:
@@ -237,7 +325,10 @@ paths:
   /v1/users/{id}/reset-password:
     post:
       tags: [Users]
-      summary: Réinitialise le mot de passe (générera un temporaire si body vide)
+      summary: Déclencher la réinitialisation du mot de passe
+      description: |
+        Sans body : envoie un email avec un code de réinitialisation 6 chiffres.
+        Avec `password` (mode legacy) : applique le password directement, status passe à `active`.
       parameters: [{ $ref: "#/components/parameters/UserId" }]
       requestBody:
         required: false
@@ -247,6 +338,27 @@ paths:
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ResetPasswordResp" } } } }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/users/{id}/resend-activation:
+    post:
+      tags: [Users]
+      summary: Renvoyer le code d'activation à un user en attente
+      description: |
+        Réservé aux users `pending`. Génère un nouveau code 6 chiffres
+        (invalide les précédents) et envoie le mail.
+      parameters: [{ $ref: "#/components/parameters/UserId" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent: { type: boolean }
+        "400":
+          description: User n'est pas en attente (utiliser reset-password à la place)
         "404": { $ref: "#/components/responses/NotFound" }
 
   # ---------------------------------------------------------------------------
@@ -1323,6 +1435,7 @@ components:
         full_name:     { type: string, nullable: true }
         tenant_role:   { type: string, enum: [owner, member] }
         is_superadmin: { type: boolean }
+        status:        { type: string, enum: [pending, active, disabled], description: "pending = activation par email en attente, active = compte utilisable, disabled = login bloqué" }
         last_login_at: { type: string, format: date-time, nullable: true }
         created_at:    { type: string, format: date-time }
 
@@ -1331,7 +1444,7 @@ components:
       required: [email]
       properties:
         email:         { type: string, format: email }
-        password:      { type: string, format: password, description: "Vide → mot de passe temporaire généré" }
+        password:      { type: string, format: password, description: "Optionnel (legacy). Vide = user en pending + mail d'activation envoyé." }
         full_name:     { type: string, nullable: true }
         tenant_role:   { type: string, enum: [owner, member], default: member }
         is_superadmin: { type: boolean, default: false, description: "Ignoré si l'appelant n'est pas superadmin" }
@@ -1340,7 +1453,8 @@ components:
       type: object
       properties:
         user:               { $ref: "#/components/schemas/UserListItem" }
-        temporary_password: { type: string, nullable: true }
+        activation_sent:    { type: boolean, description: "true si le mail d'activation a été envoyé" }
+        temporary_password: { type: string, nullable: true, description: "Présent uniquement en mode legacy (password fourni)" }
 
     UpdateUserReq:
       type: object
@@ -1348,16 +1462,18 @@ components:
         full_name:     { type: string, nullable: true }
         tenant_role:   { type: string, enum: [owner, member] }
         is_superadmin: { type: boolean, description: "Modifiable uniquement par un superadmin" }
+        status:        { type: string, enum: [pending, active, disabled] }
 
     ResetPasswordReq:
       type: object
       properties:
-        password: { type: string, format: password, description: "Vide → temporaire généré" }
+        password: { type: string, format: password, description: "Optionnel. Vide = mail de réinitialisation envoyé." }
 
     ResetPasswordResp:
       type: object
       properties:
-        temporary_password: { type: string, nullable: true }
+        email_sent:         { type: boolean, description: "true si le mail de réinitialisation a été envoyé" }
+        temporary_password: { type: string, nullable: true, description: "Présent uniquement en mode legacy (password fourni)" }
 
     Role:
       type: object

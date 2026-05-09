@@ -16,8 +16,9 @@ import (
 type TokenType string
 
 const (
-	TokenAccess  TokenType = "access"
-	TokenRefresh TokenType = "refresh"
+	TokenAccess     TokenType = "access"
+	TokenRefresh    TokenType = "refresh"
+	TokenActivation TokenType = "activation" // nonce court entre verify-code et set-password
 )
 
 // Claims — payload des JWT ZEINA. Les champs std (Subject, IssuedAt, ExpiresAt)
@@ -31,6 +32,9 @@ type Claims struct {
 	Role         string    `json:"role"`
 	IsSuperadmin bool      `json:"is_superadmin,omitempty"`
 	Type         TokenType `json:"type"`
+	// Purpose distingue first_login vs password_reset pour un token activation.
+	// Vide pour les autres types.
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // Signer regroupe la clé secrète et les TTL applicables.
@@ -64,6 +68,43 @@ func (s *Signer) SignAccess(userID uuid.UUID, tenantID, role string, isSuperadmi
 // SignRefresh génère un refresh token (long, à stocker côté client en cookie httpOnly).
 func (s *Signer) SignRefresh(userID uuid.UUID, tenantID, role string, isSuperadmin bool) (string, error) {
 	return s.sign(userID, tenantID, role, isSuperadmin, TokenRefresh, s.refreshTTL)
+}
+
+// SignActivation génère un nonce court qui prouve que l'utilisateur a saisi
+// le bon code 6 chiffres. Sert à enchaîner verify-code → set-password sans
+// stocker un nonce supplémentaire en DB. TTL = 5 min par défaut.
+func (s *Signer) SignActivation(userID uuid.UUID, purpose string, ttl time.Duration) (string, error) {
+	now := time.Now().UTC()
+	claims := Claims{
+		RegisteredClaims: gojwt.RegisteredClaims{
+			Subject:   userID.String(),
+			Issuer:    s.issuer,
+			IssuedAt:  gojwt.NewNumericDate(now),
+			ExpiresAt: gojwt.NewNumericDate(now.Add(ttl)),
+			NotBefore: gojwt.NewNumericDate(now),
+			ID:        uuid.NewString(),
+		},
+		Type:    TokenActivation,
+		Purpose: purpose,
+	}
+	tok := gojwt.NewWithClaims(gojwt.SigningMethodHS256, claims)
+	signed, err := tok.SignedString(s.secret)
+	if err != nil {
+		return "", fmt.Errorf("jwt sign activation: %w", err)
+	}
+	return signed, nil
+}
+
+// ParseActivation valide un nonce d'activation et retourne ses claims.
+func (s *Signer) ParseActivation(tokenStr string) (*Claims, error) {
+	c, err := s.parse(tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	if c.Type != TokenActivation {
+		return nil, fmt.Errorf("jwt: expected activation token, got %q", c.Type)
+	}
+	return c, nil
 }
 
 func (s *Signer) sign(userID uuid.UUID, tenantID, role string, isSuperadmin bool, typ TokenType, ttl time.Duration) (string, error) {

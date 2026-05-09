@@ -20,8 +20,10 @@ import (
 	"github.com/zeina/hyperviseur/packages/shared/logger"
 	sharedmqtt "github.com/zeina/hyperviseur/packages/shared/mqtt"
 
+	"github.com/zeina/hyperviseur/services/api/internal/activation"
 	"github.com/zeina/hyperviseur/services/api/internal/audit"
 	"github.com/zeina/hyperviseur/services/api/internal/handlers"
+	"github.com/zeina/hyperviseur/services/api/internal/mailer"
 	mw "github.com/zeina/hyperviseur/services/api/internal/middleware"
 	"github.com/zeina/hyperviseur/services/api/internal/rbac"
 	"github.com/zeina/hyperviseur/services/api/internal/ws"
@@ -43,6 +45,18 @@ func main() {
 		tenantSlug  = flag.String("tenant-slug", envOr("DEMO_TENANT_SLUG", "acme"), "tenant slug for MQTT topics (MVP single-tenant)")
 		logLevel    = flag.String("log-level", envOr("LOG_LEVEL", "info"), "log level")
 		logFormat   = flag.String("log-format", envOr("LOG_FORMAT", "json"), "log format")
+		// SMTP : pour l'envoi des mails d'activation et reset password.
+		// Si SMTP_HOST vide, le mailer est en mode stub (logge sans envoyer).
+		smtpHost     = flag.String("smtp-host", envOr("SMTP_HOST", ""), "SMTP host")
+		smtpPort     = flag.Int("smtp-port", envInt("SMTP_PORT", 587), "SMTP port")
+		smtpUser     = flag.String("smtp-username", envOr("SMTP_USERNAME", ""), "SMTP username")
+		smtpPwd      = flag.String("smtp-password", envOr("SMTP_PASSWORD", ""), "SMTP password")
+		smtpFrom     = flag.String("smtp-from", envOr("SMTP_FROM", ""), "From address")
+		smtpFromName = flag.String("smtp-from-name", envOr("SMTP_FROM_NAME", "ZEINA Hyperviseur"), "From display name")
+		smtpTLS      = flag.String("smtp-tls", envOr("SMTP_TLS", "starttls"), "starttls | tls | none")
+		// URL publique de l'app (pour les liens dans les mails).
+		appBaseURL = flag.String("app-base-url", envOr("APP_BASE_URL", "http://localhost:5173"), "public URL of the SPA (for email links)")
+		brandName  = flag.String("brand", envOr("BRAND_NAME", "ZEINA"), "brand name shown in emails")
 	)
 	flag.Parse()
 
@@ -116,8 +130,28 @@ func main() {
 
 	v1 := e.Group("/v1")
 
+	// --- Mailer + activation service (utilisés par auth + users) -----------
+	mailCfg := mailer.Config{
+		Host: *smtpHost, Port: *smtpPort,
+		Username: *smtpUser, Password: *smtpPwd,
+		From: *smtpFrom, FromName: *smtpFromName, TLSMode: *smtpTLS,
+	}
+	if mailCfg.From == "" {
+		mailCfg.From = mailCfg.Username
+	}
+	mailSvc := mailer.New(mailCfg, log)
+	if mailCfg.Configured() {
+		log.Info().Str("host", mailCfg.Host).Int("port", mailCfg.Port).Msg("mailer configured")
+	} else {
+		log.Info().Msg("mailer in stub mode — activation emails will NOT be delivered")
+	}
+	activationSvc := activation.NewService(pool)
+
+	// Audit logger partagé par tous les handlers qui font des actions sensibles.
+	auditLog := audit.NewLogger(pool)
+
 	// --- Auth (public) -----------------------------------------------------
-	authH := handlers.NewAuthHandler(pool, signer)
+	authH := handlers.NewAuthHandler(pool, signer, activationSvc, mailSvc, auditLog, *appBaseURL, *brandName, log)
 	authH.Register(v1.Group("/auth"))
 
 	// --- WebSocket (auth via query param ?token=) --------------------------
@@ -133,12 +167,9 @@ func main() {
 	// Resolver RBAC partagé pour toutes les routes site-scoped.
 	rs := rbac.NewResolver(pool)
 
-	// Audit logger partagé par tous les handlers qui font des actions sensibles.
-	auditLog := audit.NewLogger(pool)
-
 	// --- Routes tenant-wide (owner ou superadmin) --------------------------
 	tenantAdmin := auth.Group("", mw.RequireTenantOwner())
-	usersH := handlers.NewUsersHandler(pool, auditLog)
+	usersH := handlers.NewUsersHandler(pool, auditLog, mailSvc, activationSvc, *appBaseURL, *brandName, log)
 	usersH.Register(tenantAdmin)
 	rolesH := handlers.NewRolesHandler(pool, auditLog)
 	rolesH.Register(tenantAdmin)

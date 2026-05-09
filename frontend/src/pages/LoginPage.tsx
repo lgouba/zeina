@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, Navigate } from "react-router-dom";
+import { useNavigate, Navigate, Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { HttpError } from "../lib/api";
 import { Activity } from "lucide-react";
@@ -7,8 +7,8 @@ import { Activity } from "lucide-react";
 export function LoginPage() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@acme.test");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -65,9 +65,14 @@ export function LoginPage() {
           {loading ? "Connexion…" : "Se connecter"}
         </button>
 
-        <p className="text-xs text-slate-500 text-center">
-          Démo : <code className="text-slate-300">admin@acme.test</code> / <code className="text-slate-300">admin123</code>
-        </p>
+        <div className="space-y-1 text-center">
+          <Link to="/first-login" className="block text-xs text-brand-400 hover:text-brand-300">
+            Première connexion ? Activer mon compte
+          </Link>
+          <Link to="/forgot-password" className="block text-xs text-slate-400 hover:text-slate-200">
+            Mot de passe oublié ?
+          </Link>
+        </div>
       </form>
     </div>
   );

@@ -57,6 +57,7 @@ export interface UserListItem {
   full_name?: string | null;
   tenant_role: "owner" | "member";
   is_superadmin: boolean;
+  status: "pending" | "active" | "disabled";
   last_login_at?: string | null;
   created_at: string;
 }

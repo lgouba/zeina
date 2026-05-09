@@ -1,6 +1,8 @@
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useAuth, useIsTenantAdmin } from "./lib/auth";
 import { LoginPage } from "./pages/LoginPage";
+import { FirstLoginPage } from "./pages/FirstLoginPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { Layout } from "./components/Layout";
 import { SitesHome } from "./pages/SitesHome";
 import { DevicesPage } from "./pages/DevicesPage";
@@ -34,6 +36,8 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/first-login" element={<FirstLoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<SitesHome />} />

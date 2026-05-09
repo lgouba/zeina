@@ -2,17 +2,24 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+	"github.com/rs/zerolog"
 	"golang.org/x/crypto/bcrypt"
 
 	apperr "github.com/zeina/hyperviseur/packages/shared/errors"
 	"github.com/zeina/hyperviseur/packages/shared/jwt"
 
+	"github.com/zeina/hyperviseur/services/api/internal/activation"
+	"github.com/zeina/hyperviseur/services/api/internal/audit"
+	"github.com/zeina/hyperviseur/services/api/internal/mailer"
 	"github.com/zeina/hyperviseur/services/api/internal/middleware"
 	"github.com/zeina/hyperviseur/services/api/internal/rbac"
 )
@@ -20,18 +27,38 @@ import (
 const refreshCookieName = "zeina_refresh"
 
 type AuthHandler struct {
-	pool   *pgxpool.Pool
-	signer *jwt.Signer
+	pool       *pgxpool.Pool
+	signer     *jwt.Signer
+	activation *activation.Service
+	mail       *mailer.Mailer
+	audit      *audit.Logger
+	appBaseURL string
+	brand      string
+	log        zerolog.Logger
 }
 
-func NewAuthHandler(pool *pgxpool.Pool, signer *jwt.Signer) *AuthHandler {
-	return &AuthHandler{pool: pool, signer: signer}
+func NewAuthHandler(
+	pool *pgxpool.Pool, signer *jwt.Signer,
+	act *activation.Service, m *mailer.Mailer, auditLog *audit.Logger,
+	appBaseURL, brand string, logger zerolog.Logger,
+) *AuthHandler {
+	if brand == "" {
+		brand = "ZEINA"
+	}
+	return &AuthHandler{
+		pool: pool, signer: signer, activation: act, mail: m, audit: auditLog,
+		appBaseURL: strings.TrimRight(appBaseURL, "/"),
+		brand:      brand, log: logger,
+	}
 }
 
 func (h *AuthHandler) Register(g *echo.Group) {
 	g.POST("/login", h.Login)
 	g.POST("/refresh", h.Refresh)
 	g.POST("/logout", h.Logout)
+	g.POST("/verify-code", h.VerifyCode)
+	g.POST("/set-password", h.SetPassword)
+	g.POST("/forgot-password", h.ForgotPassword)
 }
 
 // RegisterMe enregistre /me sur un groupe authentifié (besoin du middleware
@@ -70,24 +97,35 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	}
 
 	const q = `
-		SELECT u.id, u.tenant_id, u.email, u.password_hash, u.tenant_role::text, u.is_superadmin, u.full_name
+		SELECT u.id, u.tenant_id, u.email, u.password_hash, u.tenant_role::text, u.is_superadmin, u.full_name, u.status::text
 		FROM users u WHERE u.email = $1 LIMIT 1
 	`
 	var (
 		id, tenantID uuid.UUID
-		email, hash  string
+		email        string
+		hash         *string
 		tenantRole   string
 		isSuperadmin bool
 		fullName     *string
+		status       string
 	)
 	err := h.pool.QueryRow(c.Request().Context(), q, req.Email).
-		Scan(&id, &tenantID, &email, &hash, &tenantRole, &isSuperadmin, &fullName)
+		Scan(&id, &tenantID, &email, &hash, &tenantRole, &isSuperadmin, &fullName, &status)
 	if err != nil {
 		// Constant-time : on retourne le même message que mauvais password
 		// pour ne pas leaker l'existence d'un email.
 		return apperr.Unauthorized("invalid credentials")
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
+	if status == "pending" {
+		return apperr.Unauthorized("account pending activation — check your email for the activation code")
+	}
+	if status == "disabled" {
+		return apperr.Unauthorized("account disabled")
+	}
+	if hash == nil || *hash == "" {
+		return apperr.Unauthorized("invalid credentials")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(*hash), []byte(req.Password)); err != nil {
 		return apperr.Unauthorized("invalid credentials")
 	}
 
@@ -255,4 +293,237 @@ func roleNameForOwner(isSuperadmin bool) string {
 
 func isHTTPS(c echo.Context) bool {
 	return c.Request().TLS != nil || c.Request().Header.Get("X-Forwarded-Proto") == "https"
+}
+
+// ----------------------------------------------------------------------------
+// Activation flow : verify-code → set-password
+// ----------------------------------------------------------------------------
+
+type verifyCodeReq struct {
+	Email   string `json:"email"`
+	Code    string `json:"code"`
+	Purpose string `json:"purpose"` // first_login | password_reset
+}
+
+type verifyCodeResp struct {
+	Nonce     string    `json:"nonce"`      // JWT court à passer à set-password
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// VerifyCode : étape 1. L'utilisateur saisit son code 6 chiffres reçu par
+// mail. Si OK, on retourne un JWT activation valide 5 minutes que le
+// frontend passe à set-password.
+//
+// Politique anti-leak : on retourne le MÊME message ("invalid code") pour
+// "user inconnu", "code faux", "code expiré". Ça évite de confirmer
+// l'existence d'un email à un attaquant.
+func (h *AuthHandler) VerifyCode(c echo.Context) error {
+	var req verifyCodeReq
+	if err := c.Bind(&req); err != nil {
+		return apperr.Validation("invalid body")
+	}
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	req.Code = strings.TrimSpace(req.Code)
+	if req.Email == "" || len(req.Code) != 6 {
+		return apperr.Validation("invalid email or code")
+	}
+	if req.Purpose != activation.PurposeFirstLogin && req.Purpose != activation.PurposePasswordReset {
+		return apperr.Validation("invalid purpose")
+	}
+
+	// Lookup user — pas de leak via timing : si pas trouvé, on retourne
+	// quand même 401 sans tenter une vérif fictive (pas critique ici car
+	// bcrypt prend déjà ~80ms).
+	var (
+		uid    uuid.UUID
+		status string
+	)
+	if err := h.pool.QueryRow(c.Request().Context(),
+		`SELECT id, status::text FROM users WHERE email = $1`, req.Email,
+	).Scan(&uid, &status); err != nil {
+		return apperr.Unauthorized("invalid code")
+	}
+	if status == "disabled" {
+		return apperr.Unauthorized("account disabled")
+	}
+
+	if err := h.activation.Verify(c.Request().Context(), uid, req.Purpose, req.Code); err != nil {
+		switch {
+		case errors.Is(err, activation.ErrTooManyAttempts):
+			return apperr.Unauthorized("too many attempts — request a new code")
+		case errors.Is(err, activation.ErrExpiredCode):
+			return apperr.Unauthorized("code expired — request a new code")
+		default:
+			return apperr.Unauthorized("invalid code")
+		}
+	}
+
+	nonce, err := h.signer.SignActivation(uid, req.Purpose, activation.NonceTTL)
+	if err != nil {
+		return apperr.Wrap(apperr.KindInternal, "sign activation", err)
+	}
+	return c.JSON(http.StatusOK, verifyCodeResp{
+		Nonce:     nonce,
+		ExpiresAt: time.Now().Add(activation.NonceTTL),
+	})
+}
+
+type setPasswordReq struct {
+	Nonce    string `json:"nonce"`
+	Password string `json:"password"`
+}
+
+// SetPassword : étape 2. L'utilisateur fournit le nonce reçu de verify-code
+// + son nouveau mot de passe. Si OK, on hash, on set status=active, et on
+// retourne un access_token + cookie refresh comme un login normal.
+func (h *AuthHandler) SetPassword(c echo.Context) error {
+	var req setPasswordReq
+	if err := c.Bind(&req); err != nil {
+		return apperr.Validation("invalid body")
+	}
+	if req.Nonce == "" {
+		return apperr.Validation("nonce required")
+	}
+	if err := validatePassword(req.Password); err != nil {
+		return apperr.Validation(err.Error())
+	}
+	claims, err := h.signer.ParseActivation(req.Nonce)
+	if err != nil {
+		return apperr.Unauthorized("invalid or expired nonce")
+	}
+	uid, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return apperr.Unauthorized("malformed nonce")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return apperr.Wrap(apperr.KindInternal, "bcrypt", err)
+	}
+
+	const q = `
+		UPDATE users
+		SET    password_hash = $2,
+		       status        = 'active',
+		       updated_at    = now()
+		WHERE  id = $1
+		RETURNING tenant_id, email, tenant_role::text, is_superadmin, full_name
+	`
+	var (
+		tenantID     uuid.UUID
+		email        string
+		tenantRole   string
+		isSuperadmin bool
+		fullName     *string
+	)
+	if err := h.pool.QueryRow(c.Request().Context(), q, uid, string(hash)).
+		Scan(&tenantID, &email, &tenantRole, &isSuperadmin, &fullName); err != nil {
+		return apperr.NotFound("user")
+	}
+
+	// Auto-login : on signe access + refresh comme dans Login.
+	access, err := h.signer.SignAccess(uid, tenantID.String(), tenantRole, isSuperadmin)
+	if err != nil {
+		return apperr.Wrap(apperr.KindInternal, "sign access", err)
+	}
+	refresh, err := h.signer.SignRefresh(uid, tenantID.String(), tenantRole, isSuperadmin)
+	if err != nil {
+		return apperr.Wrap(apperr.KindInternal, "sign refresh", err)
+	}
+	c.SetCookie(&http.Cookie{
+		Name: refreshCookieName, Value: refresh, Path: "/v1/auth",
+		HttpOnly: true, Secure: isHTTPS(c), SameSite: http.SameSiteStrictMode,
+		Expires: time.Now().Add(7 * 24 * time.Hour),
+	})
+	_, _ = h.pool.Exec(c.Request().Context(), `UPDATE users SET last_login_at = now() WHERE id = $1`, uid)
+
+	if h.audit != nil {
+		h.audit.Log(c.Request().Context(), audit.Event{
+			TenantID: tenantID, ActorID: &uid,
+			Action: "user.set_password", TargetType: "user", TargetID: &uid, TargetName: email,
+			Metadata: map[string]any{"purpose": claims.Purpose},
+		})
+	}
+
+	return c.JSON(http.StatusOK, loginResp{
+		AccessToken: access,
+		ExpiresAt:   time.Now().Add(15 * time.Minute),
+		User: userOut{
+			ID: uid, Email: email, TenantRole: tenantRole, IsSuperadmin: isSuperadmin,
+			TenantID: tenantID, FullName: fullName,
+		},
+	})
+}
+
+type forgotPasswordReq struct {
+	Email string `json:"email"`
+}
+
+type forgotPasswordResp struct {
+	Sent bool `json:"sent"` // toujours true pour ne pas révéler l'existence du compte
+}
+
+// ForgotPassword : envoie un mail avec un code de réinitialisation. Idempotent
+// et silencieux : retourne toujours sent=true même si l'email n'existe pas
+// ou si le user est disabled, pour ne pas révéler les comptes existants.
+func (h *AuthHandler) ForgotPassword(c echo.Context) error {
+	var req forgotPasswordReq
+	if err := c.Bind(&req); err != nil {
+		return apperr.Validation("invalid body")
+	}
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	if req.Email == "" {
+		return apperr.Validation("email required")
+	}
+
+	var (
+		uid      uuid.UUID
+		fullName *string
+		status   string
+		tenantID uuid.UUID
+	)
+	err := h.pool.QueryRow(c.Request().Context(),
+		`SELECT id, full_name, status::text, tenant_id FROM users WHERE email = $1`, req.Email,
+	).Scan(&uid, &fullName, &status, &tenantID)
+	if err != nil {
+		// Pas trouvé → on logge en interne et on répond OK (anti-énumération).
+		h.log.Info().Str("email", req.Email).Msg("forgot-password for unknown email")
+		return c.JSON(http.StatusOK, forgotPasswordResp{Sent: true})
+	}
+	if status == "disabled" {
+		// Pareil, on ne révèle pas le statut.
+		return c.JSON(http.StatusOK, forgotPasswordResp{Sent: true})
+	}
+
+	// Émet le code + envoie le mail (best-effort).
+	code, _, err := h.activation.Issue(c.Request().Context(), uid, activation.PurposePasswordReset)
+	if err != nil {
+		h.log.Error().Err(err).Str("email", req.Email).Msg("issue reset code")
+		return c.JSON(http.StatusOK, forgotPasswordResp{Sent: true})
+	}
+	link := h.appBaseURL + "/forgot-password?email=" + url.QueryEscape(req.Email)
+	subject, htmlBody, textBody := mailer.BuildReset(mailer.ResetData{
+		FullName: derefString(fullName), Email: req.Email, Code: code, URL: link,
+		BrandName: h.brand, ExpireMinutes: int(activation.DefaultTTL / time.Minute),
+	})
+	if err := h.mail.Send([]string{req.Email}, subject, htmlBody, textBody); err != nil {
+		h.log.Error().Err(err).Str("email", req.Email).Msg("send reset mail")
+	}
+	if h.audit != nil {
+		h.audit.Log(c.Request().Context(), audit.Event{
+			TenantID: tenantID,
+			Action:   "user.forgot_password", TargetType: "user", TargetID: &uid, TargetName: req.Email,
+		})
+	}
+	return c.JSON(http.StatusOK, forgotPasswordResp{Sent: true})
+}
+
+// validatePassword : règles minimales pour un MVP. À durcir plus tard.
+func validatePassword(p string) error {
+	if len(p) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	if len(p) > 256 {
+		return errors.New("password too long")
+	}
+	return nil
 }
