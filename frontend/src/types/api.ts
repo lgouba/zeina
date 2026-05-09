@@ -49,6 +49,8 @@ export interface Role {
   is_system: boolean;
   /** null = rôle tenant-wide (réutilisable sur tous les sites), sinon scope-site */
   site_id?: string | null;
+  /** nom du site (résolu côté serveur via JOIN), null si tenant-wide */
+  site_name?: string | null;
   created_at: string;
   updated_at: string;
 }

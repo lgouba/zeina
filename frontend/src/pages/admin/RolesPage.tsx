@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Plus, ShieldCheck, Trash2, Pencil, X, Lock } from "lucide-react";
+import { Plus, ShieldCheck, Trash2, Pencil, X, Lock, Building2 } from "lucide-react";
 import clsx from "clsx";
 import { api, HttpError } from "../../lib/api";
 import { Help } from "../../components/Tooltip";
@@ -102,8 +102,17 @@ function RoleCard({ role, features, onEdit, onDelete }: {
           <ShieldCheck className="h-4 w-4" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-medium">{role.name}</h3>
+            {role.site_name ? (
+              <span title={`Rôle propre au site ${role.site_name}`} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-500/30">
+                <Building2 className="h-3 w-3" /> {role.site_name}
+              </span>
+            ) : (
+              <span title="Rôle disponible pour tous les sites du tenant" className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                Tous les sites
+              </span>
+            )}
             {role.is_system && (
               <span title="Rôle système non modifiable" className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
                 <Lock className="h-3 w-3" /> système

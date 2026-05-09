@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -44,7 +45,8 @@ type roleOut struct {
 	Description *string            `json:"description,omitempty"`
 	Permissions rbac.PermissionSet `json:"permissions"`
 	IsSystem    bool               `json:"is_system"`
-	SiteID      *uuid.UUID         `json:"site_id,omitempty"` // null = rôle tenant-wide
+	SiteID      *uuid.UUID         `json:"site_id,omitempty"`   // null = rôle tenant-wide
+	SiteName    *string            `json:"site_name,omitempty"` // peuplé via LEFT JOIN
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
 }
@@ -90,19 +92,23 @@ func (h *RolesHandler) List(c echo.Context) error {
 			return apperr.Validation("invalid site_id")
 		}
 		const q = `
-			SELECT id, name, description, permissions, is_system, site_id, created_at, updated_at
-			FROM   roles
-			WHERE  tenant_id = $1
-			  AND  (site_id IS NULL OR site_id = $2)
-			ORDER BY is_system DESC, name
+			SELECT r.id, r.name, r.description, r.permissions, r.is_system, r.site_id, s.name,
+			       r.created_at, r.updated_at
+			FROM   roles r
+			LEFT JOIN sites s ON s.id = r.site_id
+			WHERE  r.tenant_id = $1
+			  AND  (r.site_id IS NULL OR r.site_id = $2)
+			ORDER BY r.is_system DESC, COALESCE(s.name, ''), r.name
 		`
 		rows, err = h.pool.Query(c.Request().Context(), q, tid, sid)
 	} else {
 		const q = `
-			SELECT id, name, description, permissions, is_system, site_id, created_at, updated_at
-			FROM   roles
-			WHERE  tenant_id = $1
-			ORDER BY is_system DESC, name
+			SELECT r.id, r.name, r.description, r.permissions, r.is_system, r.site_id, s.name,
+			       r.created_at, r.updated_at
+			FROM   roles r
+			LEFT JOIN sites s ON s.id = r.site_id
+			WHERE  r.tenant_id = $1
+			ORDER BY r.is_system DESC, COALESCE(s.name, ''), r.name
 		`
 		rows, err = h.pool.Query(c.Request().Context(), q, tid)
 	}
@@ -114,7 +120,8 @@ func (h *RolesHandler) List(c echo.Context) error {
 	for rows.Next() {
 		var r roleOut
 		var permsRaw []byte
-		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &permsRaw, &r.IsSystem, &r.SiteID, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &permsRaw, &r.IsSystem,
+			&r.SiteID, &r.SiteName, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return apperr.Wrap(apperr.KindInternal, "scan role", err)
 		}
 		r.Permissions = rbac.ParsePermissions(permsRaw)
@@ -162,6 +169,7 @@ func (h *RolesHandler) Create(c echo.Context) error {
 		return apperr.Wrap(apperr.KindInternal, "insert role", err)
 	}
 	r.Permissions = rbac.ParsePermissions(permsRaw)
+	r.SiteName = lookupSiteName(c.Request().Context(), h.pool, r.SiteID)
 
 	callerUID, _ := uuid.Parse(callerClaims(c).Subject)
 	h.audit.Log(c.Request().Context(), audit.Event{
@@ -170,6 +178,19 @@ func (h *RolesHandler) Create(c echo.Context) error {
 		Metadata: map[string]any{"permissions": r.Permissions},
 	})
 	return c.JSON(http.StatusCreated, r)
+}
+
+// lookupSiteName retourne le nom du site pour un site_id donné, ou nil si
+// le rôle est tenant-wide (siteID nil) ou si le lookup échoue.
+func lookupSiteName(ctx context.Context, pool *pgxpool.Pool, siteID *uuid.UUID) *string {
+	if siteID == nil {
+		return nil
+	}
+	var name string
+	if err := pool.QueryRow(ctx, `SELECT name FROM sites WHERE id = $1`, *siteID).Scan(&name); err != nil {
+		return nil
+	}
+	return &name
 }
 
 type updateRoleReq struct {
@@ -227,6 +248,7 @@ func (h *RolesHandler) Update(c echo.Context) error {
 		return apperr.Wrap(apperr.KindInternal, "update role", err)
 	}
 	r.Permissions = rbac.ParsePermissions(permsRaw)
+	r.SiteName = lookupSiteName(c.Request().Context(), h.pool, r.SiteID)
 
 	callerUID, _ := uuid.Parse(callerClaims(c).Subject)
 	h.audit.Log(c.Request().Context(), audit.Event{
