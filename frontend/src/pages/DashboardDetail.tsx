@@ -69,8 +69,7 @@ export function DashboardDetail() {
     <div className="p-6">
       <header className="flex items-start justify-between mb-5 gap-4">
         <div>
-          <h1 className="text-xl font-semibold">{dash.name}</h1>
-          {dash.description && <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{dash.description}</p>}
+          {dash.description && <p className="text-sm text-slate-500 dark:text-slate-400">{dash.description}</p>}
           {!locked && (
             <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
               Édition active — glisse les widgets pour les déplacer, attrape le coin pour redimensionner.
