@@ -26,9 +26,10 @@ services:
     networks: [zeina]
 
   mosquitto:
-    # Garder 1883 publié si des capteurs externes (LoRa gateway, etc.) doivent
-    # se connecter directement. Sinon décommenter le reset ci-dessous.
-    # ports: !reset []
+    # Pas de port publié sur l'host par défaut (évite conflits avec d'autres
+    # projets sur le VPS). Si un capteur externe doit se connecter en MQTT,
+    # republier ici : ports: ["1883:1883"]
+    ports: !reset []
     networks: [zeina]
 
   redis:
