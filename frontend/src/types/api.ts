@@ -53,6 +53,15 @@ export interface Role {
   updated_at: string;
 }
 
+/** Affectation d'un user à un site avec son rôle. */
+export interface UserMembership {
+  site_id: string;
+  site_name: string;
+  site_slug: string;
+  role_id: string;
+  role_name: string;
+}
+
 export interface UserListItem {
   id: string;
   email: string;

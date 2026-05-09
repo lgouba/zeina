@@ -64,6 +64,7 @@ func (h *UsersHandler) Register(g *echo.Group) {
 	g.DELETE("/users/:id", h.Delete)
 	g.POST("/users/:id/reset-password", h.ResetPassword)
 	g.POST("/users/:id/resend-activation", h.ResendActivation)
+	g.GET("/users/:id/memberships", h.Memberships)
 }
 
 type userListOut struct {
@@ -541,6 +542,69 @@ func (h *UsersHandler) ResetPassword(c echo.Context) error {
 		Metadata: map[string]any{"mode": "email", "sent": sent},
 	})
 	return c.JSON(http.StatusOK, resetPasswordResp{EmailSent: sent})
+}
+
+// ---------------------------------------------------------------------------
+// Memberships — liste des sites où le user est explicitement membre + son rôle.
+//
+// Utilisé par le UserModal frontend pour préremplir le picker Site/Rôle en
+// édition. Pour un user owner ou superadmin, retourne une liste vide (ils
+// ont accès à tous les sites implicitement, pas via site_members).
+// ---------------------------------------------------------------------------
+
+type membershipOut struct {
+	SiteID   uuid.UUID `json:"site_id"`
+	SiteName string    `json:"site_name"`
+	SiteSlug string    `json:"site_slug"`
+	RoleID   uuid.UUID `json:"role_id"`
+	RoleName string    `json:"role_name"`
+}
+
+func (h *UsersHandler) Memberships(c echo.Context) error {
+	caller := callerClaims(c)
+	if caller == nil {
+		return apperr.Unauthorized("")
+	}
+	uid, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return apperr.Validation("invalid user id")
+	}
+
+	// Cross-tenant guard : non-superadmin ne peut pas inspecter d'autres tenants.
+	var targetTID uuid.UUID
+	if err := h.pool.QueryRow(c.Request().Context(),
+		`SELECT tenant_id FROM users WHERE id = $1`, uid).Scan(&targetTID); err != nil {
+		return apperr.NotFound("user")
+	}
+	if !caller.IsSuperadmin {
+		callerTID, _ := uuid.Parse(caller.TenantID)
+		if targetTID != callerTID {
+			return apperr.Forbidden("cross-tenant lookup")
+		}
+	}
+
+	const q = `
+		SELECT s.id, s.name, s.slug, r.id, r.name
+		FROM   site_members sm
+		JOIN   sites s ON s.id = sm.site_id
+		JOIN   roles r ON r.id = sm.role_id
+		WHERE  sm.user_id = $1
+		ORDER BY s.name
+	`
+	rows, err := h.pool.Query(c.Request().Context(), q, uid)
+	if err != nil {
+		return apperr.Wrap(apperr.KindInternal, "query memberships", err)
+	}
+	defer rows.Close()
+	out := []membershipOut{}
+	for rows.Next() {
+		var m membershipOut
+		if err := rows.Scan(&m.SiteID, &m.SiteName, &m.SiteSlug, &m.RoleID, &m.RoleName); err != nil {
+			return apperr.Wrap(apperr.KindInternal, "scan membership", err)
+		}
+		out = append(out, m)
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // ---------------------------------------------------------------------------

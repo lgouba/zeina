@@ -22,7 +22,7 @@ import {
 import { api, HttpError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { Help } from "../../components/Tooltip";
-import type { Role, Site, UserListItem } from "../../types/api";
+import type { Role, Site, UserListItem, UserMembership } from "../../types/api";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -309,6 +309,11 @@ function UserModal({ mode, user: existing, onClose, onSaved, canSetSuperadmin }:
   // Données chargées
   const [sites, setSites] = useState<Site[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [memberships, setMemberships] = useState<UserMembership[]>([]);
+  // ID de la membership initialement chargée → sert à détecter si l'admin a
+  // changé le site/rôle au save (on supprime alors l'ancienne et crée la nouvelle).
+  const [initialMembership, setInitialMembership] = useState<UserMembership | null>(null);
+  const [loadingMemberships, setLoadingMemberships] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -317,6 +322,32 @@ function UserModal({ mode, user: existing, onClose, onSaved, canSetSuperadmin }:
   // Charge la liste des sites une fois.
   useEffect(() => {
     api.get<Site[]>("/v1/sites").then(setSites).catch(() => {});
+  }, []);
+
+  // En édition : charge les memberships de l'utilisateur pour préremplir le
+  // picker. Cas spéciaux :
+  //   - owner / superadmin → pas de memberships dans la table (accès implicite),
+  //     on laisse SITE_ALL pré-sélectionné.
+  //   - 1 seule membership → préremplit Site + Rôle.
+  //   - plusieurs memberships → on prend la première par défaut, mais on
+  //     affiche un avertissement disant d'utiliser Membres du site pour le
+  //     multi-affectation.
+  useEffect(() => {
+    if (mode !== "edit" || !existing) return;
+    if (existing.tenant_role === "owner" || existing.is_superadmin) return;
+    setLoadingMemberships(true);
+    api.get<UserMembership[]>(`/v1/users/${existing.id}/memberships`)
+      .then((ms) => {
+        setMemberships(ms);
+        if (ms.length > 0) {
+          setSiteSelection(ms[0].site_id);
+          setInitialMembership(ms[0]);
+          // roleId sera préselectionné dans le useEffect site → roles
+        }
+      })
+      .catch(() => { /* silencieux : on laisse l'admin choisir */ })
+      .finally(() => setLoadingMemberships(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Recharge les rôles à chaque changement de site (filtre site_id côté API
@@ -330,16 +361,23 @@ function UserModal({ mode, user: existing, onClose, onSaved, canSetSuperadmin }:
     api.get<Role[]>(`/v1/roles?site_id=${encodeURIComponent(siteSelection)}`)
       .then((r) => {
         setRoles(r);
-        if (mode === "create") {
-          // Préselection : "Invité" (rôle système le moins permissif), sinon
-          // le premier de la liste.
+        // En édition : si on a une membership initiale et que le rôle existe
+        // dans la liste, on le presélectionne.
+        if (mode === "edit" && initialMembership && initialMembership.site_id === siteSelection) {
+          if (r.some((x) => x.id === initialMembership.role_id)) {
+            setRoleId(initialMembership.role_id);
+            return;
+          }
+        }
+        // En création (ou en cas de switch de site) : "Invité" par défaut.
+        if (mode === "create" || !roleId) {
           const guest = r.find((x) => x.name === "Invité") || r[0];
           setRoleId(guest ? guest.id : "");
         }
       })
       .catch(() => setRoles([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [siteSelection]);
+  }, [siteSelection, initialMembership]);
 
   // Quand on est en édition d'un membre, on ne sait pas a priori sur quel
   // site il est affecté (le picker simple n'est pas idéal pour le multi-site).
@@ -399,6 +437,48 @@ function UserModal({ mode, user: existing, onClose, onSaved, canSetSuperadmin }:
       if (canSetSuperadmin) body.is_superadmin = isSuperadmin;
       if (existing && status !== existing.status) body.status = status;
       await api.put(`/v1/users/${existing!.id}`, body);
+
+      // Synchroniser l'affectation site/rôle si elle a changé.
+      // Cas :
+      //   1. owner→member : ajouter une membership sur le site choisi
+      //   2. member→owner : supprimer la membership initiale (l'owner a accès
+      //      implicite à tous les sites, plus besoin)
+      //   3. member→member même site, rôle différent : update via re-POST
+      //      (le backend POST /v1/sites/:id/members fait UPSERT)
+      //   4. member→member site différent : delete ancienne + add nouvelle
+      const failures: string[] = [];
+      if (existing) {
+        const wasOwner = existing.tenant_role === "owner";
+        const isOwnerNow = tenantRole === "owner";
+
+        if (!isOwnerNow && siteSelection && siteSelection !== SITE_ALL && roleId) {
+          // Ajouter / mettre à jour la membership sur le site sélectionné.
+          // Si on change de site, supprimer d'abord l'ancienne.
+          if (initialMembership && initialMembership.site_id !== siteSelection) {
+            try {
+              await api.del(`/v1/sites/${initialMembership.site_id}/members/${existing.id}`);
+            } catch (e) {
+              failures.push(`Suppression de l'ancienne affectation : ${e instanceof HttpError ? e.payload.message : "erreur"}`);
+            }
+          }
+          try {
+            await api.post(`/v1/sites/${siteSelection}/members`, {
+              user_id: existing.id, role_id: roleId,
+            });
+          } catch (e) {
+            failures.push(`Affectation : ${e instanceof HttpError ? e.payload.message : "erreur"}`);
+          }
+        } else if (isOwnerNow && !wasOwner && initialMembership) {
+          // Devient owner → on peut nettoyer la membership existante (optionnel).
+          try {
+            await api.del(`/v1/sites/${initialMembership.site_id}/members/${existing.id}`);
+          } catch { /* silencieux : non bloquant */ }
+        }
+      }
+      if (failures.length > 0) {
+        setWarning(failures.join(" — "));
+        return;
+      }
       onSaved();
     } catch (e) {
       setError(e instanceof HttpError ? e.payload.message : "Erreur");
@@ -509,10 +589,26 @@ function UserModal({ mode, user: existing, onClose, onSaved, canSetSuperadmin }:
             )}
           </div>
 
-          {mode === "edit" && (
+          {mode === "edit" && memberships.length > 1 && (
+            <div className="mt-3 p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-xs text-amber-800 dark:text-amber-200">
+              <div className="font-medium mb-1">Cet utilisateur a {memberships.length} affectations sur des sites différents :</div>
+              <ul className="list-disc list-inside space-y-0.5 ml-1">
+                {memberships.map((m) => (
+                  <li key={m.site_id}><strong>{m.site_name}</strong> — {m.role_name}</li>
+                ))}
+              </ul>
+              <p className="mt-2 italic">
+                Modifier le site/rôle ici ne touchera que celle sélectionnée. Pour gérer toutes les affectations, utilisez la page <strong>Membres du site</strong> de chaque site.
+              </p>
+            </div>
+          )}
+          {mode === "edit" && memberships.length <= 1 && (
             <p className="text-[11px] text-slate-500 dark:text-slate-400 italic mt-3">
-              Pour gérer plusieurs affectations sur des sites différents, utilisez la page <strong>Membres du site</strong>.
+              Pour ajouter d'autres affectations sur des sites différents, utilisez la page <strong>Membres du site</strong>.
             </p>
+          )}
+          {loadingMemberships && (
+            <p className="text-[11px] text-slate-400 italic mt-3">Chargement des affectations…</p>
           )}
 
           {canSetSuperadmin && (

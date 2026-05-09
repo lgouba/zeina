@@ -344,6 +344,35 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/users/{id}/memberships:
+    get:
+      tags: [Users]
+      summary: Affectations site/rôle d'un utilisateur
+      description: |
+        Liste les sites où l'utilisateur est explicitement membre via `site_members`.
+        Vide pour les owners du tenant et les superadmins (accès implicite à tout
+        le tenant — pas via `site_members`).
+
+        Utilisé par le frontend pour préremplir le picker Site/Rôle en édition.
+      parameters: [{ $ref: "#/components/parameters/UserId" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    site_id:   { type: string, format: uuid }
+                    site_name: { type: string }
+                    site_slug: { type: string }
+                    role_id:   { type: string, format: uuid }
+                    role_name: { type: string }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/users/{id}/resend-activation:
     post:
       tags: [Users]
