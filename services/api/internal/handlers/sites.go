@@ -338,7 +338,10 @@ func (h *SitesHandler) Create(c echo.Context) error {
 	}
 
 	// Crée les 2 rôles système site-scope ("Responsable de site" et "Invité")
-	// pour ce nouveau site. Pattern repris de la migration 0016.
+	// pour ce nouveau site. Pattern repris de la migration 0016/0017.
+	//   - Responsable de site : write partout
+	//   - Invité              : read partout (dashboards, équipements + zones,
+	//                           règles + alarmes, membres en lecture)
 	if _, err := tx.Exec(c.Request().Context(), `
 		INSERT INTO roles (tenant_id, site_id, name, description, permissions, is_system)
 		VALUES
@@ -347,8 +350,8 @@ func (h *SitesHandler) Create(c echo.Context) error {
 		     jsonb_build_object('dashboard','write','devices','write','rules','write','members','write'),
 		     true),
 		    ($1, $2, 'Invité',
-		     'Accès en lecture seule sur les dashboards et équipements.',
-		     jsonb_build_object('dashboard','read','devices','read','rules','none','members','none'),
+		     'Accès en lecture seule à toutes les fonctionnalités du site.',
+		     jsonb_build_object('dashboard','read','devices','read','rules','read','members','read'),
 		     true)
 		ON CONFLICT DO NOTHING`,
 		tid, s.ID,
