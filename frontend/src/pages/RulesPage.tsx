@@ -45,9 +45,9 @@ export function RulesPage() {
     if (!siteId || !token) return;
     setLoading(true);
     Promise.all([
-      api.get<Rule[]>(`/v1/sites/${siteId}/rules`),
-      api.get<DeviceListItem[]>(`/v1/sites/${siteId}/devices`),
-      api.get<Zone[]>(`/v1/sites/${siteId}/zones`).catch(() => []),
+      api.get<Rule[]>(`/v1/sites/${siteId}/rules`).catch((e) => { console.error("load rules:", e); return [] as Rule[]; }),
+      api.get<DeviceListItem[]>(`/v1/sites/${siteId}/devices`).catch((e) => { console.error("load devices:", e); return [] as DeviceListItem[]; }),
+      api.get<Zone[]>(`/v1/sites/${siteId}/zones`).catch((e) => { console.error("load zones:", e); return [] as Zone[]; }),
     ]).then(([r, d, z]) => { setRules(r); setDevices(d); setZones(z); }).finally(() => setLoading(false));
   };
   useEffect(reload, [siteId, token]);
