@@ -67,7 +67,7 @@ export function LoginPage() {
 
         <div className="space-y-1 text-center">
           <Link to="/first-login" className="block text-xs text-brand-600 dark:text-brand-400 hover:text-brand-500 dark:hover:text-brand-300">
-            Première connexion ? Activer mon compte
+            Première connexion ?
           </Link>
           <Link to="/forgot-password" className="block text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
             Mot de passe oublié ?
