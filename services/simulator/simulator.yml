@@ -1,0 +1,89 @@
+# =============================================================================
+# Configuration par défaut du simulator ZEINA
+#
+# 1 tenant "acme" / 1 site "hq-ouaga" / 3 zones / 10 devices virtuels.
+# La zone open-space-1 illustre le couplage : présence → CO2/T°,
+# relais lumière → lux, présence + relais → consommation Linky.
+# =============================================================================
+
+broker: tcp://mosquitto:1883
+username: simulator
+password: changeme_sim
+client_id_prefix: zeina-sim
+tenant: acme
+seed: 42
+
+measurement_qos: 0
+state_qos: 1
+
+sites:
+  - id: hq-ouaga
+    zones:
+
+      # -----------------------------------------------------------------------
+      # Open space — exemple complet avec couplages
+      # -----------------------------------------------------------------------
+      - id: open-space-1
+        devices:
+          - id: env-01
+            type: environment
+            measurements: [temperature, humidity, co2, lux]
+            interval: 30s
+            couplings:
+              presence: pir-01
+              light_relay: relay-light-01
+
+          - id: pir-01
+            type: presence
+            interval: 5s
+            schedule: "occupied 08:00-18:00 mon-fri"
+
+          - id: relay-light-01
+            type: actuator
+            initial_state: "off"
+
+      # -----------------------------------------------------------------------
+      # Salle de réunion — schedule plus court, pas de relais lumière
+      # -----------------------------------------------------------------------
+      - id: meeting-room-1
+        devices:
+          - id: env-02
+            type: environment
+            measurements: [temperature, humidity, co2]
+            interval: 30s
+            couplings:
+              presence: pir-02
+
+          - id: pir-02
+            type: presence
+            interval: 5s
+            schedule: "occupied 09:00-12:00 mon-fri"
+
+      # -----------------------------------------------------------------------
+      # Tableau électrique — Linky + relais clim
+      # -----------------------------------------------------------------------
+      - id: tableau-elec
+        devices:
+          - id: linky-01
+            type: linky
+            interval: 10s
+            couplings:
+              light_relay: relay-light-01
+              presence: pir-01
+
+          - id: relay-clim-01
+            type: actuator
+            initial_state: "off"
+
+          - id: relay-light-02
+            type: actuator
+            initial_state: "on"
+
+          - id: env-03
+            type: environment
+            measurements: [temperature]
+            interval: 60s
+
+          - id: pir-03
+            type: presence
+            interval: 30s

@@ -1,0 +1,181 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Annule les runs en cours sur la même branche → économise des minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # =============================================================================
+  # Lint Go (golangci-lint sur chaque module)
+  # =============================================================================
+  lint-go:
+    name: Lint Go
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - services/api
+          - services/rules-engine
+          - services/ingestor
+          - services/simulator
+          - services/connectors/iotsens
+          - services/connectors/iotsens-fake
+          - packages/shared
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62
+          working-directory: ${{ matrix.module }}
+          args: --config=${{ github.workspace }}/.golangci.yml --timeout=5m
+
+  # =============================================================================
+  # Tests Go unitaires (sans DB)
+  # =============================================================================
+  test-go-unit:
+    name: Tests Go (unitaires)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - services/api
+          - services/rules-engine
+          - services/ingestor
+          - services/simulator
+          - services/connectors/iotsens
+          - services/connectors/iotsens-fake
+          - packages/shared
+    env:
+      GOWORK: off
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      # La spec OpenAPI est embarquée par services/api/internal/handlers
+      # — copiée dans le package juste avant les tests pour que `go:embed` la voie.
+      - name: Préparer les sources d'embed (api uniquement)
+        if: matrix.module == 'services/api'
+        run: cp openapi/openapi.yaml services/api/internal/handlers/openapi.yaml
+      - name: go test (sans intégration)
+        working-directory: ${{ matrix.module }}
+        run: go test -race -count=1 -short ./...
+
+  # =============================================================================
+  # Tests d'intégration (avec Postgres + TimescaleDB + migrations)
+  # =============================================================================
+  test-go-integration:
+    name: Tests d'intégration API
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:2.17.2-pg16
+        env:
+          POSTGRES_USER: zeina
+          POSTGRES_PASSWORD: changeme_pg
+          POSTGRES_DB: zeina
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zeina -d zeina"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GOWORK: off
+      TEST_DATABASE_URL: postgres://zeina:changeme_pg@localhost:5432/zeina?sslmode=disable
+      DATABASE_URL: postgres://zeina:changeme_pg@localhost:5432/zeina?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: services/api/go.sum
+
+      # Active timescaledb dans la base + applique les migrations.
+      - name: Activer l'extension TimescaleDB
+        run: |
+          PGPASSWORD=changeme_pg psql -h localhost -U zeina -d zeina \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+
+      - name: Appliquer les migrations
+        uses: docker://migrate/migrate:v4.18.1
+        with:
+          args: >-
+            -path=/github/workspace/migrations
+            -database=postgres://zeina:changeme_pg@postgres:5432/zeina?sslmode=disable
+            up
+
+      - name: Préparer la spec OpenAPI pour go:embed
+        run: cp openapi/openapi.yaml services/api/internal/handlers/openapi.yaml
+
+      - name: Lancer les tests d'intégration
+        working-directory: services/api
+        run: go test -race -count=1 -run 'Test' ./internal/handlers/... -v
+
+  # =============================================================================
+  # Frontend
+  # =============================================================================
+  frontend:
+    name: Frontend (typecheck + tests + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type-check
+        run: npm run lint
+      - name: Tests Vitest
+        run: npm test
+      - name: Build production
+        run: npm run build
+
+  # =============================================================================
+  # Docker build (vérifie que les images compilent ; pas de push)
+  # =============================================================================
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: [lint-go, test-go-unit, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: api,           dockerfile: services/api/Dockerfile,                  context: . }
+          - { name: rules-engine,  dockerfile: services/rules-engine/Dockerfile,         context: . }
+          - { name: ingestor,      dockerfile: services/ingestor/Dockerfile,             context: . }
+          - { name: frontend,      dockerfile: frontend/Dockerfile,                      context: . }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.service.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          push: false
+          load: false
+          tags: zeina/${{ matrix.service.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}

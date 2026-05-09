@@ -1,0 +1,43 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go
+vendor/
+go.work.sum
+
+# Env
+.env
+.env.local
+.env.prod
+*.local
+
+# Generated
+openapi/openapi.gen.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker volumes (en local)
+data/
+
+# Logs
+*.log

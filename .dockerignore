@@ -1,0 +1,21 @@
+# Patterns ignorés dans le build context Docker (s'applique à TOUS les
+# Dockerfiles, peu importe leur emplacement).
+.git
+.github
+.idea
+.vscode
+.env
+.env.*
+data
+
+# Artefacts de build / dépendances volumineuses
+**/node_modules
+**/dist
+**/.vite
+
+# Caches et infra hors-build
+db/init
+mosquitto
+queries
+migrations
+scripts

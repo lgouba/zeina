@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+/* ----- Inputs : forcer une couleur de texte explicite pour éviter de
+   l'hériter du body (qui change selon le thème). Évite le bug "noir sur
+   noir" dans les formulaires sombres en mode clair. ----- */
+input, select, textarea {
+  color: #0f172a; /* slate-900 */
+}
+.dark input, .dark select, .dark textarea {
+  color: #e2e8f0; /* slate-200 */
+}
+input::placeholder, textarea::placeholder {
+  color: #94a3b8; /* slate-400 */
+}
+.dark input::placeholder, .dark textarea::placeholder {
+  color: #64748b; /* slate-500 */
+}
+/* Si l'input est posé sur un fond sombre (bg-slate-8XX/9XX/950), on force
+   le texte en clair même en mode light pour garder la lisibilité. */
+input.bg-slate-950, input.bg-slate-900, input.bg-slate-800,
+select.bg-slate-950, select.bg-slate-900, select.bg-slate-800,
+textarea.bg-slate-950, textarea.bg-slate-900, textarea.bg-slate-800 {
+  color: #e2e8f0 !important;
+}
+
+/* ----- react-grid-layout : styles minimaux + adaptation au thème ZEINA ----- */
+.react-grid-layout {
+  position: relative;
+  transition: height 200ms ease;
+}
+.react-grid-item {
+  transition: all 200ms ease;
+  transition-property: left, top, width, height;
+}
+.react-grid-item.cssTransforms {
+  transition-property: transform, width, height;
+}
+.react-grid-item.resizing {
+  z-index: 3;
+  will-change: width, height;
+  opacity: 0.95;
+}
+.react-grid-item.react-draggable-dragging {
+  transition: none;
+  z-index: 4;
+  cursor: grabbing;
+}
+.react-grid-item.react-grid-placeholder {
+  background: rgb(14 165 233 / 0.18);
+  border: 2px dashed rgb(14 165 233 / 0.5);
+  border-radius: 12px;
+  opacity: 0.9;
+  transition-duration: 100ms;
+  z-index: 2;
+}
+.react-grid-item > .react-resizable-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  right: 0;
+  bottom: 0;
+  cursor: se-resize;
+  background: none;
+}
+.react-grid-item > .react-resizable-handle::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid rgb(14 165 233 / 0.8);
+  border-bottom: 2px solid rgb(14 165 233 / 0.8);
+  border-radius: 1px;
+}

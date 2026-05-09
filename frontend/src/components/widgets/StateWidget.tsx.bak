@@ -1,0 +1,64 @@
+import { useState } from "react";
+import { Lightbulb, Power, Loader2 } from "lucide-react";
+import clsx from "clsx";
+import { api, HttpError } from "../../lib/api";
+import { useLiveState } from "../../lib/liveStore";
+import type { Widget } from "../../types/api";
+
+/**
+ * StateWidget — affiche l'état d'un actionneur et expose deux boutons ON/OFF
+ * pour le piloter via l'API (qui publie sur MQTT).
+ */
+export function StateWidget({ widget }: { widget: Widget }) {
+  const cfg = widget.config as Record<string, string | undefined>;
+  const deviceId = cfg.device_id as string;
+  const siteSlug = cfg.site_slug as string;
+  const deviceSlug = cfg.device_slug as string;
+
+  const live = useLiveState(siteSlug || null, deviceSlug || null) as { state?: string } | undefined;
+  const state: "on" | "off" | "?" = live?.state === "on" ? "on" : live?.state === "off" ? "off" : "?";
+
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send(target: "on" | "off") {
+    setError(null);
+    setPending(target);
+    try {
+      await api.post(`/v1/devices/${deviceId}/command`, {
+        action: "set",
+        payload: { state: target },
+      });
+    } catch (e) {
+      setError(e instanceof HttpError ? e.payload.message : "Erreur");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  const isLight = (cfg.icon as string) === "light" || deviceSlug?.includes("light");
+
+  return (
+    <div className="text-center py-2">
+      <div className="text-xs uppercase tracking-wider text-slate-400 mb-3">{widget.title}</div>
+      <div className={clsx(
+        "mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-3",
+        state === "on" ? "bg-amber-500/20 text-amber-300" : "bg-slate-800 text-slate-500"
+      )}>
+        {isLight ? <Lightbulb className="h-7 w-7" /> : <Power className="h-7 w-7" />}
+      </div>
+      <div className="text-sm text-slate-300 mb-3 capitalize">État : <span className={state === "on" ? "text-amber-300 font-medium" : "text-slate-400 font-medium"}>{state}</span></div>
+      <div className="flex gap-2 justify-center">
+        <button onClick={() => send("off")} disabled={pending !== null || state === "off"}
+          className="px-3 py-1.5 text-xs rounded-md bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition flex items-center gap-1">
+          {pending === "off" && <Loader2 className="h-3 w-3 animate-spin" />}OFF
+        </button>
+        <button onClick={() => send("on")} disabled={pending !== null || state === "on"}
+          className="px-3 py-1.5 text-xs rounded-md bg-brand-500 hover:bg-brand-400 disabled:opacity-40 transition flex items-center gap-1 text-white">
+          {pending === "on" && <Loader2 className="h-3 w-3 animate-spin" />}ON
+        </button>
+      </div>
+      {error && <div className="text-[10px] text-red-400 mt-2">{error}</div>}
+    </div>
+  );
+}

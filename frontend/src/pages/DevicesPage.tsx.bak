@@ -1,0 +1,200 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Plus, Search, RefreshCw, Trash2, Lightbulb, Thermometer, Activity, Cpu, Zap, Gauge, ChevronRight } from "lucide-react";
+import clsx from "clsx";
+import { api, HttpError } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { CreateDeviceModal } from "../components/CreateDeviceModal";
+import type { DeviceListItem } from "../types/api";
+
+export function DevicesPage() {
+  const { id: siteId } = useParams<{ id: string }>();
+  const { token } = useAuth();
+  const navigate = useNavigate();
+  const [devices, setDevices] = useState<DeviceListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [filterCategory, setFilterCategory] = useState<string>("");
+  const [filterStatus, setFilterStatus] = useState<string>("");
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const reload = () => {
+    if (!siteId || !token) return;
+    setLoading(true);
+    const qs = new URLSearchParams();
+    if (filterCategory) qs.set("category", filterCategory);
+    if (filterStatus) qs.set("status", filterStatus);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    api.get<DeviceListItem[]>(`/v1/sites/${siteId}/devices${suffix}`)
+      .then(setDevices).finally(() => setLoading(false));
+  };
+  useEffect(reload, [siteId, token, filterCategory, filterStatus]);
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of devices) if (d.category) set.add(d.category);
+    return Array.from(set).sort();
+  }, [devices]);
+
+  const filtered = useMemo(() => {
+    if (!search) return devices;
+    const q = search.toLowerCase();
+    return devices.filter((d) =>
+      d.slug.toLowerCase().includes(q) ||
+      (d.name?.toLowerCase().includes(q) ?? false) ||
+      d.zone_name.toLowerCase().includes(q) ||
+      (d.model?.toLowerCase().includes(q) ?? false));
+  }, [devices, search]);
+
+  async function onDelete(e: React.MouseEvent, id: string, name: string) {
+    e.stopPropagation();
+    if (!confirm(`Supprimer l'équipement "${name}" ?`)) return;
+    try {
+      await api.del(`/v1/devices/${id}`);
+      reload();
+    } catch (e) {
+      alert(e instanceof HttpError ? e.payload.message : String(e));
+    }
+  }
+
+  function openDevice(d: DeviceListItem) {
+    navigate(`/sites/${siteId}/devices/${d.id}`);
+  }
+
+  return (
+    <div className="p-6">
+      <header className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="text-2xl font-semibold">Équipements</h1>
+          <p className="text-sm text-slate-400">{filtered.length} équipement{filtered.length > 1 ? "s" : ""}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={reload}
+            className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300">
+            <RefreshCw className="h-3.5 w-3.5" /> Actualiser
+          </button>
+          <button onClick={() => setCreateOpen(true)}
+            className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md bg-brand-500 hover:bg-brand-400 text-white">
+            <Plus className="h-3.5 w-3.5" /> Nouvel équipement
+          </button>
+        </div>
+      </header>
+
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher slug, nom, zone…"
+            className="pl-8 pr-3 py-2 rounded-md bg-slate-900 border border-slate-800 text-sm w-72 focus:outline-none focus:border-brand-500" />
+        </div>
+        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
+          className="px-3 py-2 rounded-md bg-slate-900 border border-slate-800 text-sm">
+          <option value="">Toutes catégories</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
+          className="px-3 py-2 rounded-md bg-slate-900 border border-slate-800 text-sm">
+          <option value="">Tous états</option>
+          <option value="online">En ligne</option>
+          <option value="offline">Hors ligne</option>
+          <option value="provisioned">Provisionné</option>
+          <option value="disabled">Désactivé</option>
+        </select>
+      </div>
+
+      <div className="rounded-xl border border-slate-800 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-900/80 text-xs uppercase text-slate-400">
+            <tr>
+              <th className="px-4 py-2.5 text-left">Équipement</th>
+              <th className="px-4 py-2.5 text-left">Zone</th>
+              <th className="px-4 py-2.5 text-left">Catégorie</th>
+              <th className="px-4 py-2.5 text-left">Type</th>
+              <th className="px-4 py-2.5 text-left">Modèle</th>
+              <th className="px-4 py-2.5 text-left">État</th>
+              <th className="px-4 py-2.5 text-left">Dernière info</th>
+              <th className="px-4 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800">
+            {loading ? (
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-500 text-xs">Chargement…</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-500 text-xs italic">Aucun équipement</td></tr>
+            ) : filtered.map((d) => (
+              <tr key={d.id} onClick={() => openDevice(d)}
+                className="group hover:bg-slate-900/70 cursor-pointer transition">
+                <td className="px-4 py-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <DeviceTypeIcon type={d.type} />
+                    <div>
+                      <div className="font-medium group-hover:text-brand-300 transition">{d.name || d.slug}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">{d.slug}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-2.5 text-slate-300">{d.zone_name}</td>
+                <td className="px-4 py-2.5">
+                  {d.category ? <CategoryBadge name={d.category} /> : <span className="text-slate-600">—</span>}
+                </td>
+                <td className="px-4 py-2.5 text-xs text-slate-400 capitalize">{d.type}</td>
+                <td className="px-4 py-2.5 text-xs text-slate-400">{d.model || "—"}</td>
+                <td className="px-4 py-2.5"><StatusPill status={d.status} /></td>
+                <td className="px-4 py-2.5 text-xs text-slate-500">
+                  {d.last_seen_at ? new Date(d.last_seen_at).toLocaleString("fr-FR") : "—"}
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <div className="flex items-center gap-2 justify-end">
+                    <button onClick={(e) => onDelete(e, d.id, d.name || d.slug)}
+                      className="text-slate-500 hover:text-red-400 transition opacity-0 group-hover:opacity-100" title="Supprimer">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                    <ChevronRight className="h-4 w-4 text-slate-600 group-hover:text-brand-400 transition" />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {createOpen && siteId && (
+        <CreateDeviceModal siteId={siteId} onClose={() => setCreateOpen(false)} onCreated={() => { setCreateOpen(false); reload(); }} />
+      )}
+    </div>
+  );
+}
+
+function DeviceTypeIcon({ type }: { type: string }) {
+  const map: Record<string, { Icon: typeof Cpu; color: string }> = {
+    environment: { Icon: Thermometer, color: "text-emerald-400 bg-emerald-500/10" },
+    presence:    { Icon: Activity,    color: "text-violet-400 bg-violet-500/10" },
+    actuator:    { Icon: Lightbulb,   color: "text-amber-400 bg-amber-500/10" },
+    linky:       { Icon: Zap,         color: "text-yellow-400 bg-yellow-500/10" },
+    meter:       { Icon: Gauge,       color: "text-blue-400 bg-blue-500/10" },
+    gateway:     { Icon: Cpu,         color: "text-slate-400 bg-slate-700" },
+  };
+  const { Icon, color } = map[type] || map.gateway;
+  return <div className={clsx("rounded-md p-1.5", color)}><Icon className="h-3.5 w-3.5" /></div>;
+}
+
+function CategoryBadge({ name }: { name: string }) {
+  return <span className="text-xs px-2 py-0.5 rounded-md bg-slate-800 text-slate-300">{name}</span>;
+}
+
+function StatusPill({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    online:      "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
+    offline:     "bg-slate-700/50 text-slate-400 border-slate-700",
+    disabled:    "bg-red-500/10 text-red-300 border-red-500/30",
+    provisioned: "bg-amber-500/10 text-amber-300 border-amber-500/30",
+  };
+  const label: Record<string, string> = {
+    online: "En ligne", offline: "Hors ligne", disabled: "Désactivé", provisioned: "Provisionné",
+  };
+  return (
+    <span className={clsx("text-[10px] px-2 py-0.5 rounded-md border", map[status] || map.offline)}>
+      {label[status] || status}
+    </span>
+  );
+}

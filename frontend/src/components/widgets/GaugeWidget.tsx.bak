@@ -1,0 +1,70 @@
+import { useEffect, useState } from "react";
+import { api } from "../../lib/api";
+import { useLiveMeasurement } from "../../lib/liveStore";
+import type { Widget, LatestReading } from "../../types/api";
+
+/**
+ * GaugeWidget — jauge demi-cercle simple (SVG arc) avec valeur, unité,
+ * borne min et borne max. Pas de lib externe.
+ */
+export function GaugeWidget({ widget }: { widget: Widget }) {
+  const cfg = widget.config as Record<string, string | number | undefined>;
+  const deviceId = cfg.device_id as string;
+  const measurement = cfg.measurement as string;
+  const unit = (cfg.unit as string) || "";
+  const min = Number(cfg.min ?? 0);
+  const max = Number(cfg.max ?? 100);
+  const siteSlug = cfg.site_slug as string;
+  const deviceSlug = cfg.device_slug as string;
+
+  const [initial, setInitial] = useState<LatestReading | undefined>();
+  useEffect(() => {
+    if (!deviceId || !measurement) return;
+    api.get<LatestReading[]>(`/v1/devices/${deviceId}/latest`)
+      .then((arr) => setInitial(arr.find((m) => m.measurement === measurement)))
+      .catch(() => {});
+  }, [deviceId, measurement]);
+
+  const live = useLiveMeasurement(siteSlug || null, deviceSlug || null, measurement || null);
+  const value = live?.value ?? initial?.value ?? min;
+
+  const ratio = Math.max(0, Math.min(1, (value - min) / (max - min || 1)));
+  const angle = -90 + ratio * 180;
+
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-slate-400 mb-1 text-center">{widget.title}</div>
+      <svg viewBox="0 0 200 120" className="w-full h-32">
+        {/* arc background */}
+        <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#1e293b" strokeWidth="14" strokeLinecap="round" />
+        {/* arc value */}
+        <path
+          d={describeArc(100, 100, 80, -90, angle)}
+          fill="none"
+          stroke={ratio > 0.85 ? "#ef4444" : ratio > 0.6 ? "#f59e0b" : "#0ea5e9"}
+          strokeWidth="14"
+          strokeLinecap="round"
+        />
+        {/* needle */}
+        <circle cx="100" cy="100" r="6" fill="#475569" />
+      </svg>
+      <div className="text-center -mt-4">
+        <div className="text-2xl font-bold text-brand-300">
+          {value.toFixed(1)}<span className="text-sm text-slate-400 font-normal ml-1">{unit}</span>
+        </div>
+        <div className="text-[10px] text-slate-500 mt-0.5">{min} – {max} {unit}</div>
+      </div>
+    </div>
+  );
+}
+
+function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number): string {
+  const start = polar(cx, cy, r, endAngle);
+  const end = polar(cx, cy, r, startAngle);
+  const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
+  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 0 ${end.x} ${end.y}`;
+}
+function polar(cx: number, cy: number, r: number, angle: number) {
+  const a = (angle - 0) * Math.PI / 180;
+  return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+}

@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS dashboard_widgets CASCADE;
+DROP TABLE IF EXISTS dashboards CASCADE;
+DROP TYPE IF EXISTS widget_type;

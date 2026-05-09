@@ -1,0 +1,41 @@
+# =============================================================================
+# Mosquitto ACL — ZEINA
+#
+# Convention topic : qlab/{tenant_id}/{site_id}/{zone_id}/{device_id}/{measurement|cmd/...}
+#
+# Utilisateurs applicatifs (créés par scripts/mosquitto-bootstrap.sh) :
+#   api        : peut publish sur cmd/* (issuer de commandes)
+#   ingestor   : read-only sur measurements
+#   rules      : read measurements + publish cmd
+#   simulator  : read/write tout (dev) — à restreindre tenant en prod
+#
+# Les devices (ESP32, capteurs réels) auront un user MQTT par device avec
+# une ACL générée dynamiquement par scripts/mosquitto-bootstrap.sh à partir
+# de la table devices (mqtt_id + mqtt_password_hash).
+# =============================================================================
+
+# --- API ----------------------------------------------------------------------
+# write cmd/+    : envoi de commandes vers les actionneurs
+# write meas     : injection de mesures via POST /v1/devices/:id/measurements
+#                  (test depuis Postman, intégrations HTTP-only)
+# read partout   : pour le WebSocket broadcaster
+user api
+topic write qlab/+/+/+/+/cmd/+
+topic write qlab/+/+/+/+/+
+topic read qlab/+/+/+/+/state
+topic read qlab/+/+/+/+/+
+topic read qlab/+/_alerts/+
+
+# --- Ingestor (lecture seule des mesures) -------------------------------------
+user ingestor
+topic read qlab/+/+/+/+/+
+
+# --- Rules engine (lit mesures, publie commandes + alertes) ------------------
+user rules
+topic read qlab/+/+/+/+/+
+topic write qlab/+/+/+/+/cmd/+
+topic write qlab/+/_alerts/+
+
+# --- Simulator (dev — droits larges sous qlab/) -------------------------------
+user simulator
+topic readwrite qlab/#

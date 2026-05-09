@@ -1,0 +1,11 @@
+go 1.22
+
+use (
+	./packages/shared
+	./services/api
+	./services/ingestor
+	./services/rules-engine
+	./services/simulator
+	./services/connectors/iotsens
+	./services/connectors/iotsens-fake
+)

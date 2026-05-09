@@ -1,0 +1,72 @@
+# Configuration golangci-lint pour ZEINA — sélection minimale et stable.
+# Voir https://golangci-lint.run/ — version 1.62+ requise.
+
+run:
+  timeout: 5m
+  go: "1.22"
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck       # erreurs ignorées
+    - govet          # vet stdlib + plus
+    - ineffassign    # assignments inutiles
+    - staticcheck    # bugs et code smells
+    - unused         # code mort
+    - gofmt          # formatage standard
+    - goimports      # ordre des imports
+    - bodyclose      # http.Response.Body fermé
+    - gocritic       # patterns
+    - revive         # remplaçant de golint, peu strict ici
+  # Note : misspell désactivé volontairement — le code et les commentaires
+  # mélangent français et anglais, ses faux positifs ne valent pas le coup.
+
+linters-settings:
+  revive:
+    rules:
+      - name: blank-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+        disabled: true   # trop bruyant pour les handlers Echo
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  gocritic:
+    disabled-checks:
+      - ifElseChain      # parfois plus lisible
+      - singleCaseSwitch
+      - exitAfterDefer   # log.Fatal en main est un pattern courant et accepté
+
+  goimports:
+    local-prefixes: github.com/zeina/hyperviseur
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10
+  exclude-rules:
+    # Tests : on accepte les patterns plus relâchés.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gocritic
+    # Le code généré (sqlc) ne doit pas être linté.
+    - path: packages/shared/db/sqlc/
+      linters:
+        - revive
+        - staticcheck
+        - gocritic
+        - unused

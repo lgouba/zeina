@@ -1,0 +1,48 @@
+import { useEffect, useState } from "react";
+import { api } from "../../lib/api";
+import { useLiveMeasurement } from "../../lib/liveStore";
+import type { Widget, LatestReading } from "../../types/api";
+
+export function ValueWidget({ widget }: { widget: Widget }) {
+  const cfg = widget.config as Record<string, string | number | undefined>;
+  const deviceId = cfg.device_id as string;
+  const measurement = cfg.measurement as string;
+  const unit = (cfg.unit as string) || "";
+  const decimals = (cfg.decimals as number) ?? 1;
+  const siteSlug = cfg.site_slug as string;
+  const deviceSlug = cfg.device_slug as string;
+
+  // Fetch initial REST puis flux live
+  const [initial, setInitial] = useState<LatestReading | undefined>();
+  useEffect(() => {
+    if (!deviceId || !measurement) return;
+    api.get<LatestReading[]>(`/v1/devices/${deviceId}/latest`)
+      .then((arr) => setInitial(arr.find((m) => m.measurement === measurement)))
+      .catch(() => {});
+  }, [deviceId, measurement]);
+
+  const live = useLiveMeasurement(siteSlug || null, deviceSlug || null, measurement || null);
+  const value = live?.value ?? initial?.value;
+  const ts = live?.ts || initial?.ts;
+
+  return (
+    <div className="text-center py-3">
+      <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">{widget.title}</div>
+      {value != null ? (
+        <>
+          <div className="text-4xl font-bold text-brand-300">
+            {Number(value).toFixed(decimals)}
+            {unit && <span className="text-base text-slate-400 font-normal ml-1">{unit}</span>}
+          </div>
+          {ts && (
+            <div className="text-[10px] text-slate-500 mt-2">
+              {new Date(ts).toLocaleTimeString("fr-FR")}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-sm text-slate-500 py-6">—</div>
+      )}
+    </div>
+  );
+}

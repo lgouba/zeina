@@ -1,0 +1,41 @@
+version: "2"
+
+# =============================================================================
+# sqlc — génération de code Go type-safe à partir des fichiers .sql
+#
+# Le code généré atterrit dans packages/shared/db/sqlc/ pour être réutilisé
+# par tous les services Go (api, ingestor, rules-engine).
+# =============================================================================
+sql:
+  - engine: postgresql
+    queries: ./queries
+    schema: ./migrations
+    gen:
+      go:
+        package: sqlc
+        out: ./packages/shared/db/sqlc
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_db_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        emit_enum_valid_method: true
+        emit_all_enum_values: true
+        rename:
+          mqtt_id: MQTTID
+        overrides:
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"

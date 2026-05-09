@@ -1,0 +1,22 @@
+import { MeasurementChart } from "../MeasurementChart";
+import type { Widget } from "../../types/api";
+
+export function LineWidget({ widget }: { widget: Widget }) {
+  const cfg = widget.config as Record<string, string | number | undefined>;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs uppercase tracking-wider text-slate-400">{widget.title}</div>
+        {cfg.unit && <div className="text-[10px] text-slate-500">{cfg.unit as string}</div>}
+      </div>
+      <MeasurementChart
+        deviceId={cfg.device_id as string}
+        siteSlug={cfg.site_slug as string}
+        deviceSlug={cfg.device_slug as string}
+        measurement={cfg.measurement as string}
+        unit={cfg.unit as string | undefined}
+        windowMinutes={(cfg.window_minutes as number) || 30}
+      />
+    </div>
+  );
+}

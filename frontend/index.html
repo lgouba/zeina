@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZEINA — Hyperviseur</title>
+    <!-- Bootstrap thème : applique la class "dark" AVANT le rendu React pour
+         éviter le flash de fond clair quand l'utilisateur préfère le sombre. -->
+    <script>
+      (function() {
+        try {
+          var t = localStorage.getItem("zeina_theme");
+          if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          if (t === "dark") document.documentElement.classList.add("dark");
+        } catch (e) { document.documentElement.classList.add("dark"); }
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,1949 @@
+openapi: 3.1.0
+info:
+  title: ZEINA Hyperviseur API
+  version: "1.0.0"
+  description: |
+    REST + WebSocket API du superviseur IoT ZEINA.
+
+    ## Authentification
+    1. POST `/v1/auth/login` retourne un access token (15 min) + un refresh token (cookie httpOnly, 7 j).
+    2. Les routes protégées attendent l'access token dans `Authorization: Bearer <token>`.
+    3. Quand le token expire, POST `/v1/auth/refresh` produit un nouvel access (utilise le cookie).
+
+    ## Modèle d'autorisation
+    - **Superadmin** (`is_superadmin=true`) : bypass complet.
+    - **Owner du tenant** (`tenant_role=owner`) : accès implicite à tous les sites + gestion users/rôles.
+    - **Membre simple** : accès aux sites où il est listé dans `site_members`, selon le rôle.
+    - Chaque rôle attribue un niveau (`none`/`read`/`write`) sur 4 fonctionnalités : `dashboard`, `devices`, `rules`, `members`.
+
+    ## Test rapide
+    1. Clique « Authorize » en haut, paste l'access token (sans le préfixe Bearer).
+    2. Tous les calls authentifiés vont passer.
+
+servers:
+  - url: /
+    description: |
+      Origine courante (relatif). Quand tu importes ce spec dans Bruno/Postman,
+      remplace par `http://localhost:5173` (via nginx) ou `http://localhost:3000`
+      (API directe) — sans slash final.
+
+tags:
+  - name: Auth
+  - name: Sites
+  - name: Users
+  - name: Roles
+  - name: Site members
+  - name: Devices
+  - name: Device models
+  - name: Dashboards & widgets
+  - name: Rules
+  - name: Alarms
+  - name: Commands
+  - name: Realtime
+  - name: Audit
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # AUTH
+  # ---------------------------------------------------------------------------
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: Echange email/password contre un access token + cookie de refresh.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginReq" }
+            examples:
+              demo: { value: { email: admin@acme.test, password: admin123 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/LoginResp" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Renouvelle l'access token via cookie httpOnly
+      security: []
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/RefreshResp" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout (efface le cookie de refresh)
+      responses:
+        "204": { description: No content }
+
+  /v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Profil + snapshot des permissions par site
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/MeResp" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ---------------------------------------------------------------------------
+  # SITES
+  # ---------------------------------------------------------------------------
+  /v1/sites:
+    get:
+      tags: [Sites]
+      summary: Liste des sites accessibles à l'utilisateur courant
+      description: Pour un owner/superadmin → tous les sites du tenant. Pour un membre → uniquement les sites où il est dans `site_members`.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Site" } } } } }
+    post:
+      tags: [Sites]
+      summary: Créer un site (owner / superadmin)
+      description: |
+        Crée un site et ajoute automatiquement le créateur comme **Responsable de site**
+        dans `site_members`. Opération transactionnelle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSiteReq" }
+            examples:
+              bobo:
+                value:
+                  slug: agence-bobo
+                  name: Agence Bobo-Dioulasso
+                  address: "Rue Verte, Bobo"
+                  lat: 11.1771
+                  lng: -4.2979
+                  timezone: Africa/Ouagadougou
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Site" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/sites/{id}:
+    parameters: [{ $ref: "#/components/parameters/SiteId" }]
+    get:
+      tags: [Sites]
+      summary: Détail d'un site
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Site" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Sites]
+      summary: Modifier un site (owner / superadmin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSiteReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Site" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Sites]
+      summary: Supprimer un site (owner / superadmin)
+      description: Cascade — supprime aussi zones, devices, dashboards, règles, members et mesures associées.
+      responses:
+        "204": { description: No content }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/sites/{id}/tree:
+    get:
+      tags: [Sites]
+      summary: Arborescence site → zones → équipements
+      parameters: [{ $ref: "#/components/parameters/SiteId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/SiteTree" } } } }
+
+  /v1/sites/{id}/summary:
+    get:
+      tags: [Sites]
+      summary: KPI agrégés d'un site (température moyenne, énergie 24 h, etc.)
+      parameters: [{ $ref: "#/components/parameters/SiteId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/SiteSummary" } } } }
+
+  # ---------------------------------------------------------------------------
+  # USERS  (owner ou superadmin)
+  # ---------------------------------------------------------------------------
+  /v1/users:
+    get:
+      tags: [Users]
+      summary: Liste des utilisateurs du tenant
+      description: |
+        Réservé aux owners du tenant ou superadmins.
+        Si superadmin avec `?all=1` : retourne les users de TOUS les tenants.
+      parameters:
+        - in: query
+          name: all
+          schema: { type: integer, enum: [1] }
+          required: false
+          description: Superadmin uniquement — retourne tous les users.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/UserListItem" } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Users]
+      summary: Créer un utilisateur
+      description: Si `password` est vide, un mot de passe temporaire est généré et retourné.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserReq" }
+            examples:
+              member:
+                value: { email: marie@acme.test, full_name: "Marie Test", tenant_role: member }
+              owner_with_password:
+                value: { email: pdg@acme.test, full_name: "PDG", tenant_role: owner, password: "super-strong" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/CreateUserResp" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/users/{id}:
+    parameters: [{ $ref: "#/components/parameters/UserId" }]
+    put:
+      tags: [Users]
+      summary: Mettre à jour un utilisateur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateUserReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/UserListItem" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Users]
+      summary: Supprimer un utilisateur
+      responses:
+        "204": { description: No content }
+        "400":
+          description: Tentative de suppression de soi-même
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/users/{id}/reset-password:
+    post:
+      tags: [Users]
+      summary: Réinitialise le mot de passe (générera un temporaire si body vide)
+      parameters: [{ $ref: "#/components/parameters/UserId" }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ResetPasswordResp" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------------------
+  # ROLES
+  # ---------------------------------------------------------------------------
+  /v1/roles:
+    get:
+      tags: [Roles]
+      summary: Liste des rôles du tenant
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Role" } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Roles]
+      summary: Créer un rôle custom
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRoleReq" }
+            examples:
+              maintenance:
+                value:
+                  name: "Technicien terrain"
+                  description: "Voit + édite les équipements, lecture seule sur le reste"
+                  permissions:
+                    dashboard: read
+                    devices: write
+                    rules: read
+                    members: none
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Role" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/roles/{id}:
+    parameters: [{ $ref: "#/components/parameters/RoleId" }]
+    put:
+      tags: [Roles]
+      summary: Modifier un rôle (rôles système refusés)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateRoleReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Role" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [Roles]
+      summary: Supprimer un rôle (rôles système refusés ; rôle utilisé refusé)
+      responses:
+        "204": { description: No content }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/roles/features:
+    get:
+      tags: [Roles]
+      summary: Référentiel des fonctionnalités (pour la matrice UI)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code: { $ref: "#/components/schemas/Feature" }
+                    label: { type: string }
+                    description: { type: string }
+
+  # ---------------------------------------------------------------------------
+  # SITE MEMBERS
+  # ---------------------------------------------------------------------------
+  /v1/sites/{id}/members:
+    parameters: [{ $ref: "#/components/parameters/SiteId" }]
+    get:
+      tags: [Site members]
+      summary: Liste des membres du site
+      description: Requiert la permission `members:read` sur le site.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/SiteMember" } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Site members]
+      summary: Ajouter (ou changer le rôle d') un membre
+      description: Requiert `members:write`. Comportement upsert sur la clé (site, user).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddMemberReq" }
+      responses:
+        "204": { description: No content }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/sites/{id}/members/{user_id}:
+    parameters:
+      - { $ref: "#/components/parameters/SiteId" }
+      - { $ref: "#/components/parameters/MemberUserId" }
+    put:
+      tags: [Site members]
+      summary: Changer le rôle d'un membre
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_id]
+              properties:
+                role_id: { type: string, format: uuid }
+      responses:
+        "204": { description: No content }
+    delete:
+      tags: [Site members]
+      summary: Retirer un membre du site
+      responses:
+        "204": { description: No content }
+
+  # ---------------------------------------------------------------------------
+  # DEVICES
+  # ---------------------------------------------------------------------------
+  /v1/sites/{id}/devices:
+    parameters: [{ $ref: "#/components/parameters/SiteId" }]
+    get:
+      tags: [Devices]
+      summary: Liste des équipements d'un site
+      description: Requiert `devices:read`.
+      parameters:
+        - in: query
+          name: category
+          schema: { type: string }
+        - in: query
+          name: type
+          schema: { $ref: "#/components/schemas/DeviceType" }
+        - in: query
+          name: status
+          schema: { $ref: "#/components/schemas/DeviceStatus" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DeviceListItem" } } } } }
+    post:
+      tags: [Devices]
+      summary: Provisionner un nouvel équipement
+      description: Requiert `devices:write`. Retourne aussi les credentials MQTT à configurer sur le device.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDeviceReq" }
+            examples:
+              env_sensor:
+                value:
+                  zone_id: "44444444-4444-4444-4444-444444444444"
+                  type: environment
+                  slug: salle-reunion-1
+                  name: "Capteur salle de réunion"
+                  category: ambient
+                  model: SCD41
+                  measurements: [temperature, humidity, co2]
+                  metadata: {}
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/CreateDeviceResp" } } } }
+
+  /v1/sites/{id}/zones:
+    parameters: [{ $ref: "#/components/parameters/SiteId" }]
+    get:
+      tags: [Devices]
+      summary: Liste des zones du site (arbre hiérarchique aplati)
+      description: |
+        Retourne toutes les zones, triées par parent puis nom. Le client
+        reconstruit l'arbre via `parent_zone_id`. Chaque zone a un `kind`
+        (`geographic`/`building_group`/`building`/`floor`/`room`).
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Zone" } } } } }
+    post:
+      tags: [Devices]
+      summary: Créer une zone (devices:write)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateZoneReq" }
+            examples:
+              building:
+                value: { name: "Bâtiment principal", slug: "bat-principal", kind: "building" }
+              room_in_floor:
+                value:
+                  name: "Salle 204"
+                  slug: "salle-204"
+                  kind: "room"
+                  parent_zone_id: "44444444-..."
+                  description: "Salle de classe — 30 places"
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Zone" } } } }
+
+  /v1/zones/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+        description: ID de la zone
+    put:
+      tags: [Devices]
+      summary: Modifier une zone (devices:write)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateZoneReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Zone" } } } }
+    delete:
+      tags: [Devices]
+      summary: Supprimer une zone (refusée si elle contient des sous-zones ou devices)
+      responses:
+        "204": { description: No content }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/devices/{id}:
+    parameters: [{ $ref: "#/components/parameters/DeviceId" }]
+    get:
+      tags: [Devices]
+      summary: Détail d'un équipement
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Device" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Devices]
+      summary: Mettre à jour un équipement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateDeviceReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Device" } } } }
+    delete:
+      tags: [Devices]
+      summary: Supprimer un équipement
+      responses:
+        "204": { description: No content }
+
+  /v1/devices/{id}/latest:
+    get:
+      tags: [Devices]
+      summary: Dernière valeur connue par mesure
+      parameters: [{ $ref: "#/components/parameters/DeviceId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/LatestReading" } } } } }
+
+  /v1/devices/{id}/measurements:
+    parameters: [{ $ref: "#/components/parameters/DeviceId" }]
+    get:
+      tags: [Devices]
+      summary: Série temporelle d'une mesure (raw ou agrégée)
+      parameters:
+        - in: query
+          name: measurement
+          required: true
+          schema: { type: string }
+          example: temperature
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: aggregation
+          required: false
+          schema: { type: string, enum: [raw, "1min", "15min", "1h", "1d"] }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Series" } } } }
+    post:
+      tags: [Devices]
+      summary: Injecter manuellement une mesure (test)
+      description: Publie sur le topic MQTT du device — utile pour les démos / tests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PublishMeasurementReq" }
+            examples:
+              temp:
+                value: { measurement: temperature, value: 22.5, unit: "°C" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PublishMeasurementResp" } } } }
+
+  /v1/devices/{id}/measurements-metadata:
+    get:
+      tags: [Devices]
+      summary: Métadonnées d'une mesure (unité, bornes, description)
+      parameters: [{ $ref: "#/components/parameters/DeviceId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/MeasurementMeta" } } } } }
+
+  /v1/devices/{id}/command:
+    post:
+      tags: [Commands]
+      summary: Envoyer une commande à un actionneur
+      description: Requiert `devices:write`. Publie une commande MQTT sur le topic `cmd/{action}`.
+      parameters: [{ $ref: "#/components/parameters/DeviceId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommandReq" }
+            examples:
+              relay_on:
+                value: { action: set, payload: { state: "on" } }
+              relay_off:
+                value: { action: set, payload: { state: "off" } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/CommandResp" } } } }
+
+  # ---------------------------------------------------------------------------
+  # DEVICE MODELS (catalogue)
+  # ---------------------------------------------------------------------------
+  /v1/device-models:
+    get:
+      tags: [Device models]
+      summary: Catalogue des modèles d'équipements
+      parameters:
+        - in: query
+          name: category
+          schema: { type: string }
+        - in: query
+          name: brand
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DeviceModel" } } } } }
+    post:
+      tags: [Device models]
+      summary: Ajouter un modèle au catalogue
+      description: Réservé aux owners du tenant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDeviceModelReq" }
+            examples:
+              netatmo:
+                value:
+                  brand: Netatmo
+                  code: NAModule1
+                  category: environment
+                  protocol: http
+                  description: "Module extérieur Netatmo (T° + humidité)"
+                  default_interval_minutes: 10
+                  attributes:
+                    - { name: temperature, unit: "°C", min_value: -40, max_value: 65, position: 1, configurable: false }
+                    - { name: humidity,    unit: "%",  min_value: 0,   max_value: 100, position: 2, configurable: false }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/DeviceModel" } } } }
+
+  /v1/device-models/{id}:
+    parameters: [{ $ref: "#/components/parameters/ModelId" }]
+    get:
+      tags: [Device models]
+      summary: Détail d'un modèle
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DeviceModel" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Device models]
+      summary: Modifier un modèle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateDeviceModelReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DeviceModel" } } } }
+    delete:
+      tags: [Device models]
+      summary: Supprimer un modèle
+      responses:
+        "204": { description: No content }
+
+  /v1/device-models/{id}/attributes:
+    parameters: [{ $ref: "#/components/parameters/ModelId" }]
+    post:
+      tags: [Device models]
+      summary: Ajouter un attribut/mesure à un modèle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateAttributeReq" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/ModelAttribute" } } } }
+
+  /v1/model-attributes/{id}:
+    delete:
+      tags: [Device models]
+      summary: Supprimer un attribut
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: No content }
+
+  # ---------------------------------------------------------------------------
+  # DASHBOARDS
+  # ---------------------------------------------------------------------------
+  /v1/sites/{id}/dashboards:
+    parameters: [{ $ref: "#/components/parameters/SiteId" }]
+    get:
+      tags: [Dashboards & widgets]
+      summary: Liste des dashboards d'un site
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DashboardListItem" } } } } }
+    post:
+      tags: [Dashboards & widgets]
+      summary: Créer un dashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDashboardReq" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Dashboard" } } } }
+
+  /v1/dashboards/{id}:
+    parameters: [{ $ref: "#/components/parameters/DashboardId" }]
+    get:
+      tags: [Dashboards & widgets]
+      summary: Détail d'un dashboard avec ses widgets
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardDetail" } } } }
+    put:
+      tags: [Dashboards & widgets]
+      summary: Renommer / décrire un dashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateDashboardReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Dashboard" } } } }
+    delete:
+      tags: [Dashboards & widgets]
+      summary: Supprimer un dashboard et ses widgets
+      responses:
+        "204": { description: No content }
+
+  /v1/dashboards/{id}/widgets:
+    parameters: [{ $ref: "#/components/parameters/DashboardId" }]
+    post:
+      tags: [Dashboards & widgets]
+      summary: Ajouter un widget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWidgetReq" }
+            examples:
+              value:
+                value:
+                  type: value
+                  title: "Humidité — Capteur ambiance"
+                  config:
+                    device_id: "<uuid>"
+                    measurement: humidity
+                    unit: "%"
+                    decimals: 1
+              gauge:
+                value:
+                  type: gauge
+                  title: "CO₂"
+                  config: { device_id: "<uuid>", measurement: co2, unit: ppm, min: 400, max: 2000 }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Widget" } } } }
+
+  /v1/widgets/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      tags: [Dashboards & widgets]
+      summary: Mettre à jour un widget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateWidgetReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Widget" } } } }
+    delete:
+      tags: [Dashboards & widgets]
+      summary: Supprimer un widget
+      responses:
+        "204": { description: No content }
+
+  /v1/dashboards/{id}/layouts:
+    parameters: [{ $ref: "#/components/parameters/DashboardId" }]
+    put:
+      tags: [Dashboards & widgets]
+      summary: Sauvegarder la layout (positions x/y/w/h des widgets)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateLayoutsReq" }
+      responses:
+        "204": { description: No content }
+
+  # ---------------------------------------------------------------------------
+  # RULES
+  # ---------------------------------------------------------------------------
+  /v1/sites/{id}/rules:
+    parameters: [{ $ref: "#/components/parameters/SiteId" }]
+    get:
+      tags: [Rules]
+      summary: Liste des règles d'un site
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Rule" } } } } }
+    post:
+      tags: [Rules]
+      summary: Créer une règle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRuleReq" }
+            examples:
+              co2_alert:
+                value:
+                  name: "Alerte CO₂"
+                  description: "Notifie si CO₂ > 1000 ppm pendant 60 s"
+                  enabled: true
+                  definition:
+                    trigger: { type: threshold, device_slug: "capteur-ambiance", measurement: co2, op: ">", value: 1000, sustained_seconds: 60 }
+                    actions: [ { type: notify, level: warning, message: "CO₂ trop élevé" } ]
+                    cooldown_seconds: 300
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Rule" } } } }
+
+  /v1/rules/{id}:
+    parameters: [{ $ref: "#/components/parameters/RuleId" }]
+    get:
+      tags: [Rules]
+      summary: Détail d'une règle
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Rule" } } } }
+    put:
+      tags: [Rules]
+      summary: Modifier une règle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateRuleReq" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Rule" } } } }
+    delete:
+      tags: [Rules]
+      summary: Supprimer une règle
+      responses:
+        "204": { description: No content }
+
+  /v1/rules/{id}/enable:
+    post:
+      tags: [Rules]
+      summary: Activer une règle
+      parameters: [{ $ref: "#/components/parameters/RuleId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Rule" } } } }
+
+  /v1/rules/{id}/disable:
+    post:
+      tags: [Rules]
+      summary: Désactiver une règle
+      parameters: [{ $ref: "#/components/parameters/RuleId" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Rule" } } } }
+
+  /v1/rules/{id}/executions:
+    get:
+      tags: [Rules]
+      summary: Historique d'exécution d'une règle
+      parameters:
+        - { $ref: "#/components/parameters/RuleId" }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/RuleExecution" } } } } }
+
+  # ---------------------------------------------------------------------------
+  # ALARMES (workflow d'incident issu de l'action `alarm` du moteur de règles)
+  # ---------------------------------------------------------------------------
+  /v1/sites/{siteId}/alarms:
+    get:
+      tags: [Alarms]
+      summary: Liste les alarmes d'un site
+      description: |
+        Retourne les alarmes filtrées par état. États possibles :
+          - `active` (défaut) : `triggered` ∪ `acknowledged`
+          - `triggered` / `acknowledged` / `resolved` / `archived`
+          - `all` : toutes
+      parameters:
+        - { $ref: "#/components/parameters/SiteId" }
+        - in: query
+          name: state
+          schema: { type: string, enum: [active, triggered, acknowledged, resolved, archived, all] }
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 200, minimum: 1, maximum: 1000 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Alarm" } } } } }
+
+  /v1/sites/{siteId}/alarms/counts:
+    get:
+      tags: [Alarms]
+      summary: Compteurs d'alarmes par état (onglets UI)
+      parameters:
+        - { $ref: "#/components/parameters/SiteId" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  triggered:    { type: integer }
+                  acknowledged: { type: integer }
+                  resolved:     { type: integer }
+                  archived:     { type: integer }
+                  active:       { type: integer, description: "triggered + acknowledged" }
+                  all:          { type: integer }
+
+  /v1/alarms/{id}:
+    get:
+      tags: [Alarms]
+      summary: Détail d'une alarme
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Alarm" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/alarms/{id}/events:
+    get:
+      tags: [Alarms]
+      summary: Historique des évènements d'une alarme
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/AlarmEvent" } } } } }
+
+  /v1/alarms/{id}/comments:
+    get:
+      tags: [Alarms]
+      summary: Liste les commentaires d'une alarme
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/AlarmComment" } } } } }
+    post:
+      tags: [Alarms]
+      summary: Ajoute un commentaire à une alarme
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/AlarmComment" } } } }
+
+  /v1/alarms/{id}/acknowledge:
+    post:
+      tags: [Alarms]
+      summary: Prendre en compte une alarme (passe à `acknowledged`)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK }
+
+  /v1/alarms/{id}/resolve:
+    post:
+      tags: [Alarms]
+      summary: Acquitter une alarme (passe à `resolved`)
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK }
+
+  /v1/alarms/{id}/archive:
+    post:
+      tags: [Alarms]
+      summary: Archiver une alarme
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK }
+
+  # ---------------------------------------------------------------------------
+  # AUDIT  (owner / superadmin)
+  # ---------------------------------------------------------------------------
+  /v1/audit:
+    get:
+      tags: [Audit]
+      summary: Journal d'audit du tenant
+      description: |
+        Retourne les événements d'audit (actions sensibles : sites, users, rôles, members)
+        pour le tenant courant. Append-only — les events ne sont jamais modifiés ni supprimés.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - in: query
+          name: action
+          schema: { type: string, example: "site.create" }
+          description: Filtre exact sur le code d'action (ex. `site.create`, `member.add`).
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ---------------------------------------------------------------------------
+  # WEBSOCKET
+  # ---------------------------------------------------------------------------
+  /v1/ws:
+    get:
+      tags: [Realtime]
+      summary: Connexion WebSocket pour le flux live
+      description: |
+        Upgrade vers WebSocket. L'authentification utilise `?token=<access_token>`
+        car le navigateur n'envoie pas le header Authorization sur l'upgrade.
+
+        Le serveur émet des messages JSON `{topic, ts, kind, payload}` à chaque
+        publication MQTT du tenant.
+      security: []
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        "101": { description: Switching protocols }
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    SiteId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+      description: ID du site
+
+    UserId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+      description: ID de l'utilisateur
+
+    MemberUserId:
+      in: path
+      name: user_id
+      required: true
+      schema: { type: string, format: uuid }
+      description: ID de l'utilisateur membre
+
+    RoleId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+      description: ID du rôle
+
+    DeviceId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+      description: ID du device
+
+    DashboardId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+      description: ID du dashboard
+
+    ModelId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+      description: ID du modèle d'équipement
+
+    RuleId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+      description: ID de la règle
+
+  responses:
+    Unauthorized:
+      description: Token manquant ou invalide
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Permission insuffisante
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Ressource introuvable
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Validation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+
+    Error:
+      type: object
+      properties:
+        error:   { type: string, example: validation }
+        message: { type: string, example: "email and password are required" }
+        details: { type: object, additionalProperties: true }
+
+    Feature:
+      type: string
+      enum: [dashboard, devices, rules, members]
+
+    PermissionLevel:
+      type: string
+      enum: [none, read, write]
+
+    PermissionSet:
+      type: object
+      properties:
+        dashboard: { $ref: "#/components/schemas/PermissionLevel" }
+        devices:   { $ref: "#/components/schemas/PermissionLevel" }
+        rules:     { $ref: "#/components/schemas/PermissionLevel" }
+        members:   { $ref: "#/components/schemas/PermissionLevel" }
+
+    # --- Auth ---------------------------------------------------------------
+    LoginReq:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, format: password }
+
+    LoginResp:
+      type: object
+      properties:
+        access_token: { type: string }
+        expires_at:   { type: string, format: date-time }
+        user:         { $ref: "#/components/schemas/UserOut" }
+
+    RefreshResp:
+      type: object
+      properties:
+        access_token: { type: string }
+        expires_at:   { type: string, format: date-time }
+
+    UserOut:
+      type: object
+      properties:
+        id:            { type: string, format: uuid }
+        email:         { type: string, format: email }
+        tenant_role:   { type: string, enum: [owner, member] }
+        is_superadmin: { type: boolean }
+        tenant_id:     { type: string, format: uuid }
+        full_name:     { type: string, nullable: true }
+
+    SiteAccess:
+      type: object
+      properties:
+        site_id:     { type: string, format: uuid }
+        site_slug:   { type: string }
+        site_name:   { type: string }
+        role_id:     { type: string, format: uuid, nullable: true }
+        role_name:   { type: string }
+        permissions: { $ref: "#/components/schemas/PermissionSet" }
+
+    MeResp:
+      type: object
+      properties:
+        user:  { $ref: "#/components/schemas/UserOut" }
+        sites:
+          type: array
+          items: { $ref: "#/components/schemas/SiteAccess" }
+
+    # --- Sites --------------------------------------------------------------
+    Site:
+      type: object
+      properties:
+        id:       { type: string, format: uuid }
+        slug:     { type: string }
+        name:     { type: string }
+        address:  { type: string, nullable: true }
+        lat:      { type: number, format: double, nullable: true }
+        lng:      { type: number, format: double, nullable: true }
+        timezone: { type: string }
+
+    CreateSiteReq:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+          pattern: "^[a-z0-9-]+$"
+          maxLength: 64
+          description: |
+            Identifiant pour les topics MQTT (`qlab/<tenant>/<slug>/...`). Minuscules, chiffres, tirets uniquement.
+        name:     { type: string }
+        address:  { type: string, nullable: true }
+        lat:      { type: number, format: double, nullable: true }
+        lng:      { type: number, format: double, nullable: true }
+        timezone: { type: string, default: "Africa/Ouagadougou" }
+
+    UpdateSiteReq:
+      type: object
+      properties:
+        name:     { type: string, nullable: true }
+        address:  { type: string, nullable: true }
+        lat:      { type: number, format: double, nullable: true }
+        lng:      { type: number, format: double, nullable: true }
+        timezone: { type: string, nullable: true }
+
+    AuditEvent:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        actor_id:     { type: string, format: uuid, nullable: true }
+        actor_email:  { type: string, format: email, nullable: true, description: "Snapshot — survit à la suppression du user" }
+        action:
+          type: string
+          example: site.create
+          description: |
+            Code court de l'action. Conventions : `<entité>.<verbe>`.
+            Valeurs connues : `site.create`, `site.update`, `site.delete`,
+            `user.create`, `user.update`, `user.delete`, `user.reset_password`,
+            `role.create`, `role.update`, `role.delete`,
+            `member.add`, `member.update`, `member.remove`.
+        target_type:  { type: string, nullable: true, example: site }
+        target_id:    { type: string, format: uuid, nullable: true }
+        target_name:  { type: string, nullable: true, description: "Snapshot lisible (nom du site, email du user…)" }
+        metadata:     { type: object, additionalProperties: true }
+        created_at:   { type: string, format: date-time }
+
+    ZoneKind:
+      type: string
+      enum: [geographic, building_group, building, floor, room]
+      description: |
+        Type de zone : `geographic` (école, parc), `building_group` (groupe de
+        bâtiments), `building` (bâtiment), `floor` (étage), `room` (pièce).
+
+    Zone:
+      type: object
+      properties:
+        id:             { type: string, format: uuid }
+        site_id:        { type: string, format: uuid }
+        parent_zone_id: { type: string, format: uuid, nullable: true }
+        slug:           { type: string }
+        name:           { type: string }
+        kind:           { $ref: "#/components/schemas/ZoneKind" }
+        description:    { type: string, nullable: true }
+        icon:           { type: string, nullable: true }
+        color:          { type: string, nullable: true, description: "Hex (ex: #38bdf8) — accent UI optionnel" }
+        geometry:
+          description: "GeoJSON optionnel (Polygon, MultiPolygon, Point) pour le tracé sur carte."
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: "null" }
+
+    CreateZoneReq:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:           { type: string, pattern: "^[a-z0-9-]+$", maxLength: 64 }
+        name:           { type: string }
+        kind:           { $ref: "#/components/schemas/ZoneKind", default: room }
+        parent_zone_id: { type: string, format: uuid, nullable: true }
+        description:    { type: string, nullable: true }
+        icon:           { type: string, nullable: true }
+        color:          { type: string, nullable: true }
+        geometry:       { type: object, additionalProperties: true, nullable: true }
+
+    UpdateZoneReq:
+      type: object
+      properties:
+        name:           { type: string, nullable: true }
+        kind:           { $ref: "#/components/schemas/ZoneKind" }
+        parent_zone_id: { type: string, format: uuid, nullable: true }
+        description:    { type: string, nullable: true }
+        icon:           { type: string, nullable: true }
+        color:          { type: string, nullable: true }
+        geometry:       { type: object, additionalProperties: true, nullable: true }
+
+    SiteTree:
+      allOf:
+        - $ref: "#/components/schemas/Site"
+        - type: object
+          properties:
+            zones:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:      { type: string, format: uuid }
+                  slug:    { type: string }
+                  name:    { type: string }
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:           { type: string, format: uuid }
+                        slug:         { type: string }
+                        name:         { type: string, nullable: true }
+                        type:         { $ref: "#/components/schemas/DeviceType" }
+                        status:       { $ref: "#/components/schemas/DeviceStatus" }
+                        last_seen_at: { type: string, format: date-time, nullable: true }
+
+    SiteSummary:
+      type: object
+      properties:
+        site_id:             { type: string, format: uuid }
+        devices_total:       { type: integer }
+        devices_online:      { type: integer }
+        energy_day_wh:       { type: number, nullable: true }
+        temperature_avg:     { type: number, nullable: true }
+        occupancy_ratio_24h: { type: number, nullable: true }
+
+    # --- Users / Roles / Members --------------------------------------------
+    UserListItem:
+      type: object
+      properties:
+        id:            { type: string, format: uuid }
+        email:         { type: string, format: email }
+        full_name:     { type: string, nullable: true }
+        tenant_role:   { type: string, enum: [owner, member] }
+        is_superadmin: { type: boolean }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        created_at:    { type: string, format: date-time }
+
+    CreateUserReq:
+      type: object
+      required: [email]
+      properties:
+        email:         { type: string, format: email }
+        password:      { type: string, format: password, description: "Vide → mot de passe temporaire généré" }
+        full_name:     { type: string, nullable: true }
+        tenant_role:   { type: string, enum: [owner, member], default: member }
+        is_superadmin: { type: boolean, default: false, description: "Ignoré si l'appelant n'est pas superadmin" }
+
+    CreateUserResp:
+      type: object
+      properties:
+        user:               { $ref: "#/components/schemas/UserListItem" }
+        temporary_password: { type: string, nullable: true }
+
+    UpdateUserReq:
+      type: object
+      properties:
+        full_name:     { type: string, nullable: true }
+        tenant_role:   { type: string, enum: [owner, member] }
+        is_superadmin: { type: boolean, description: "Modifiable uniquement par un superadmin" }
+
+    ResetPasswordReq:
+      type: object
+      properties:
+        password: { type: string, format: password, description: "Vide → temporaire généré" }
+
+    ResetPasswordResp:
+      type: object
+      properties:
+        temporary_password: { type: string, nullable: true }
+
+    Role:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        name:        { type: string }
+        description: { type: string, nullable: true }
+        permissions: { $ref: "#/components/schemas/PermissionSet" }
+        is_system:   { type: boolean }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    CreateRoleReq:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:        { type: string }
+        description: { type: string, nullable: true }
+        permissions: { $ref: "#/components/schemas/PermissionSet" }
+
+    UpdateRoleReq:
+      type: object
+      properties:
+        name:        { type: string }
+        description: { type: string, nullable: true }
+        permissions: { $ref: "#/components/schemas/PermissionSet" }
+
+    SiteMember:
+      type: object
+      properties:
+        user_id:     { type: string, format: uuid }
+        email:       { type: string, format: email }
+        full_name:   { type: string, nullable: true }
+        role_id:     { type: string, format: uuid }
+        role_name:   { type: string }
+        permissions: { $ref: "#/components/schemas/PermissionSet" }
+        added_at:    { type: string, format: date-time }
+
+    AddMemberReq:
+      type: object
+      required: [user_id, role_id]
+      properties:
+        user_id: { type: string, format: uuid }
+        role_id: { type: string, format: uuid }
+
+    # --- Devices ------------------------------------------------------------
+    DeviceType:
+      type: string
+      enum: [environment, presence, actuator, linky, meter, gateway]
+
+    DeviceStatus:
+      type: string
+      enum: [provisioned, online, offline, disabled]
+
+    Device:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        zone_id:      { type: string, format: uuid }
+        site_id:      { type: string, format: uuid }
+        slug:         { type: string }
+        name:         { type: string, nullable: true }
+        type:         { $ref: "#/components/schemas/DeviceType" }
+        category:     { type: string, nullable: true }
+        model:        { type: string, nullable: true }
+        model_id:     { type: string, format: uuid, nullable: true }
+        status:       { $ref: "#/components/schemas/DeviceStatus" }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        installed_at: { type: string, format: date-time, nullable: true }
+        metadata:     { type: object, additionalProperties: true }
+        # mqtt_id n'est PAS exposé : c'est un détail de provisioning, retourné
+        # uniquement à la création via CreateDeviceResp.mqtt_username.
+
+    DeviceListItem:
+      allOf:
+        - $ref: "#/components/schemas/Device"
+        - type: object
+          properties:
+            zone_slug: { type: string }
+            zone_name: { type: string }
+
+    CreateDeviceReq:
+      type: object
+      required: [zone_id, type, slug, name]
+      properties:
+        zone_id:      { type: string, format: uuid }
+        type:         { $ref: "#/components/schemas/DeviceType" }
+        slug:         { type: string }
+        name:         { type: string }
+        model:        { type: string }
+        category:     { type: string }
+        metadata:     { type: object, additionalProperties: true }
+        measurements: { type: array, items: { type: string } }
+        model_id:     { type: string, format: uuid, nullable: true }
+
+    CreateDeviceResp:
+      type: object
+      properties:
+        device:        { $ref: "#/components/schemas/Device" }
+        mqtt_username: { type: string }
+        mqtt_password: { type: string, description: "À configurer sur le device — non récupérable après." }
+
+    UpdateDeviceReq:
+      type: object
+      properties:
+        name:     { type: string, nullable: true }
+        model:    { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        status:   { $ref: "#/components/schemas/DeviceStatus" }
+
+    LatestReading:
+      type: object
+      properties:
+        measurement: { type: string }
+        ts:          { type: string, format: date-time }
+        value:       { type: number, format: double }
+        quality:     { type: string, enum: [good, uncertain, bad] }
+
+    SeriesPoint:
+      type: object
+      properties:
+        ts:    { type: string, format: date-time }
+        value: { type: number, format: double }
+        min:   { type: number, format: double, nullable: true }
+        max:   { type: number, format: double, nullable: true }
+
+    Series:
+      type: object
+      properties:
+        measurement: { type: string }
+        aggregation: { type: string, enum: [raw, "1min", "15min", "1h", "1d"] }
+        from:        { type: string, format: date-time }
+        to:          { type: string, format: date-time }
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/SeriesPoint" }
+
+    MeasurementMeta:
+      type: object
+      properties:
+        measurement: { type: string }
+        unit:        { type: string }
+        min_value:   { type: number, nullable: true }
+        max_value:   { type: number, nullable: true }
+        description: { type: string, nullable: true }
+
+    PublishMeasurementReq:
+      type: object
+      required: [measurement, value]
+      properties:
+        measurement: { type: string }
+        value:       { type: number, format: double }
+        ts:          { type: string, format: date-time, description: "Si vide, now()" }
+        unit:        { type: string }
+        quality:     { type: string, enum: [good, uncertain, bad] }
+
+    PublishMeasurementResp:
+      type: object
+      properties:
+        topic:       { type: string }
+        ts:          { type: string, format: date-time }
+        measurement: { type: string }
+        value:       { type: number, format: double }
+
+    # --- Commands -----------------------------------------------------------
+    CommandReq:
+      type: object
+      required: [action]
+      properties:
+        action:  { type: string, example: set }
+        payload: { type: object, additionalProperties: true }
+
+    CommandResp:
+      type: object
+      properties:
+        command_id: { type: string, format: uuid }
+        topic:      { type: string }
+        issued_at:  { type: string, format: date-time }
+
+    # --- Device models ------------------------------------------------------
+    ModelAttribute:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        unit:         { type: string }
+        min_value:    { type: number, nullable: true }
+        max_value:    { type: number, nullable: true }
+        description:  { type: string, nullable: true }
+        position:     { type: integer }
+        configurable: { type: boolean }
+
+    DeviceModel:
+      type: object
+      properties:
+        id:                       { type: string, format: uuid }
+        brand:                    { type: string }
+        code:                     { type: string }
+        category:                 { type: string }
+        protocol:                 { type: string, nullable: true }
+        description:              { type: string, nullable: true }
+        default_interval_minutes: { type: integer, nullable: true }
+        created_at:               { type: string, format: date-time }
+        updated_at:               { type: string, format: date-time }
+        attributes:
+          type: array
+          items: { $ref: "#/components/schemas/ModelAttribute" }
+
+    CreateAttributeReq:
+      type: object
+      required: [name]
+      properties:
+        name:         { type: string }
+        unit:         { type: string }
+        min_value:    { type: number, nullable: true }
+        max_value:    { type: number, nullable: true }
+        description:  { type: string }
+        position:     { type: integer }
+        configurable: { type: boolean }
+
+    CreateDeviceModelReq:
+      type: object
+      required: [brand, code, category]
+      properties:
+        brand:                    { type: string }
+        code:                     { type: string }
+        category:                 { type: string }
+        protocol:                 { type: string }
+        description:              { type: string }
+        default_interval_minutes: { type: integer, nullable: true }
+        attributes:
+          type: array
+          items: { $ref: "#/components/schemas/CreateAttributeReq" }
+
+    UpdateDeviceModelReq:
+      type: object
+      properties:
+        brand:                    { type: string, nullable: true }
+        code:                     { type: string, nullable: true }
+        category:                 { type: string, nullable: true }
+        protocol:                 { type: string, nullable: true }
+        description:              { type: string, nullable: true }
+        default_interval_minutes: { type: integer, nullable: true }
+
+    # --- Dashboards / widgets -----------------------------------------------
+    Dashboard:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        site_id:     { type: string, format: uuid }
+        name:        { type: string }
+        description: { type: string, nullable: true }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    DashboardListItem:
+      allOf:
+        - $ref: "#/components/schemas/Dashboard"
+        - type: object
+          properties:
+            widget_count: { type: integer }
+
+    Widget:
+      type: object
+      properties:
+        id:         { type: string, format: uuid }
+        type:       { type: string, enum: [value, line, area, bar, gauge, state] }
+        title:      { type: string }
+        position:   { type: integer }
+        config:     { type: object, additionalProperties: true }
+        layout:     { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+
+    DashboardDetail:
+      allOf:
+        - $ref: "#/components/schemas/Dashboard"
+        - type: object
+          properties:
+            widgets:
+              type: array
+              items: { $ref: "#/components/schemas/Widget" }
+
+    CreateDashboardReq:
+      type: object
+      required: [name]
+      properties:
+        name:        { type: string }
+        description: { type: string }
+
+    UpdateDashboardReq:
+      type: object
+      properties:
+        name:        { type: string, nullable: true }
+        description: { type: string, nullable: true }
+
+    CreateWidgetReq:
+      type: object
+      required: [type, title]
+      properties:
+        type:   { type: string, enum: [value, line, area, bar, gauge, state] }
+        title:  { type: string }
+        config: { type: object, additionalProperties: true }
+
+    UpdateWidgetReq:
+      type: object
+      properties:
+        title:    { type: string, nullable: true }
+        position: { type: integer, nullable: true }
+        config:   { type: object, additionalProperties: true }
+        layout:   { type: object, additionalProperties: true }
+
+    LayoutEntry:
+      type: object
+      required: [widget_id, x, y, w, h]
+      properties:
+        widget_id: { type: string, format: uuid }
+        x:         { type: integer }
+        y:         { type: integer }
+        w:         { type: integer }
+        h:         { type: integer }
+
+    UpdateLayoutsReq:
+      type: object
+      required: [layouts]
+      properties:
+        layouts:
+          type: array
+          items: { $ref: "#/components/schemas/LayoutEntry" }
+
+    # --- Rules --------------------------------------------------------------
+    Rule:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        tenant_id:   { type: string, format: uuid }
+        site_id:     { type: string, format: uuid }
+        name:        { type: string }
+        description: { type: string, nullable: true }
+        enabled:     { type: boolean }
+        definition:  { $ref: "#/components/schemas/RuleDefinition" }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    RuleDefinition:
+      type: object
+      required: [trigger, actions]
+      properties:
+        trigger: { $ref: "#/components/schemas/RuleTrigger" }
+        conditions_op:
+          type: string
+          enum: [AND, OR]
+          default: AND
+        conditions:
+          type: array
+          items: { $ref: "#/components/schemas/RuleCondition" }
+        actions:
+          type: array
+          items: { $ref: "#/components/schemas/RuleAction" }
+        cooldown_seconds:
+          type: integer
+          minimum: 0
+          description: Délai minimum entre 2 déclenchements (anti-rebond)
+        time_window:
+          $ref: "#/components/schemas/RuleTimeWindow"
+
+    RuleTimeWindow:
+      type: object
+      description: |
+        Créneau pendant lequel la règle est active. Hors créneau, le trigger
+        n'est pas évalué. Si `end_hour < start_hour`, la fenêtre traverse minuit.
+      properties:
+        days:
+          type: array
+          description: "Jours actifs (0=dimanche, 1=lundi, …, 6=samedi). Vide = tous les jours."
+          items: { type: integer, minimum: 0, maximum: 6 }
+        start_hour:
+          type: number
+          minimum: 0
+          maximum: 24
+          description: Heure de début (locale au fuseau, ex. 8 = 08:00)
+        end_hour:
+          type: number
+          minimum: 0
+          maximum: 24
+        timezone:
+          type: string
+          description: 'Nom IANA (ex. "Europe/Paris", "Africa/Ouagadougou"). Vide = UTC.'
+
+    RuleTrigger:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [threshold, value_change, cron, aggregate, anomaly] }
+        device_slug:
+          type: string
+          description: Cible un device unique. Alternative à `zone_scope`.
+        measurement: { type: string }
+        op: { type: string, enum: [">", ">=", "<", "<=", "==", "!="] }
+        value: { type: number }
+        sustained_seconds: { type: integer }
+        from: { type: number, nullable: true }
+        to:   { type: number, nullable: true }
+        schedule:
+          type: string
+          description: Expression cron 5 champs (ex. "0 18 * * 1-5")
+        zone_scope:
+          $ref: "#/components/schemas/RuleZoneScope"
+        aggregate:
+          $ref: "#/components/schemas/RuleAggregateSpec"
+        anomaly:
+          $ref: "#/components/schemas/RuleAnomalySpec"
+
+    RuleZoneScope:
+      type: object
+      required: [zone_id]
+      description: |
+        Étend la règle à TOUS les devices d'une zone qui exposent la mesure
+        référencée. Chaque device a son propre cooldown indépendant.
+      properties:
+        zone_id: { type: string, format: uuid }
+        device_type:
+          type: string
+          description: Filtre optionnel par type (environment, presence, actuator, linky, meter, gateway)
+
+    RuleAggregateSpec:
+      type: object
+      required: [op, window_minutes]
+      description: |
+        Calcul d'un agrégat rolling sur la mesure puis comparaison à `value`.
+        Utilise les continuous aggregates Timescale (1min/15min/1h/1d).
+      properties:
+        op:
+          type: string
+          enum: [avg, sum, min, max, count]
+        window_minutes:
+          type: integer
+          minimum: 1
+          description: Taille de la fenêtre rolling
+
+    RuleAnomalySpec:
+      type: object
+      required: [baseline_days, sigma]
+      description: |
+        Détection d'écart vs une baseline statistique calculée sur les N
+        derniers jours à la même heure. Anomaly si la valeur courante
+        s'écarte de plus de `sigma` écarts-types de la moyenne historique.
+      properties:
+        baseline_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+        sigma:
+          type: number
+          minimum: 0
+          description: Multiplicateur de l'écart-type (ex 3.0 pour la règle 3-sigma)
+
+    RuleCondition:
+      type: object
+      required: [device_slug, measurement, op, value]
+      properties:
+        device_slug: { type: string }
+        measurement: { type: string }
+        op:          { type: string, enum: [">", ">=", "<", "<=", "==", "!="] }
+        value:       { type: number }
+
+    RuleAction:
+      type: object
+      required: [type]
+      description: |
+        6 variantes :
+          - `set_actuator` (device_slug, state)
+          - `notify` (level, message)
+          - `email` (recipients[], subject, message, level)
+          - `sms` (recipients[], message, level)
+          - `webhook` (url, method, headers, body)
+          - `alarm` (severity, label, name, description, model, status_text)
+
+        Les champs textuels (message, subject, body, headers, recipients, url,
+        alarm.name/label/description/status_text) supportent le templating
+        `{var}` : voir doc `/docs#rule-templating`.
+        Variables disponibles : `{rule.name}`, `{device.name}`, `{device.slug}`,
+        `{zone.name}`, `{site.name}`, `{measurement}`, `{value}`, `{threshold}`,
+        `{op}`, `{unit}`, `{level}`, `{timestamp}`, `{date}`, `{time}`.
+      properties:
+        type: { type: string, enum: [set_actuator, notify, email, sms, webhook, alarm] }
+        device_slug: { type: string }
+        state:       { type: string }
+        level:       { type: string, enum: [info, warning, critical] }
+        message:     { type: string }
+        recipients:
+          type: array
+          items: { type: string }
+        subject: { type: string }
+        url:     { type: string, description: URL cible (webhook) }
+        method:  { type: string, enum: [GET, POST, PUT, PATCH, DELETE], default: POST }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        body:    { type: string }
+        # Champs spécifiques à l'action `alarm`
+        severity:    { type: string, enum: [minor, major, critical], description: "Sévérité (action alarm)" }
+        label:       { type: string, description: "Catégorie d'alarme (ex: Dépassement de seuil)" }
+        name:        { type: string, description: "Nom affiché de l'alarme" }
+        description: { type: string }
+        model:       { type: string, default: "Standard" }
+        status_text: { type: string, description: "ex: Comportement anormal" }
+
+    CreateRuleReq:
+      type: object
+      required: [name, definition]
+      properties:
+        name:        { type: string }
+        description: { type: string }
+        enabled:     { type: boolean, default: true }
+        definition:  { $ref: "#/components/schemas/RuleDefinition" }
+
+    UpdateRuleReq:
+      type: object
+      properties:
+        name:        { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        enabled:     { type: boolean, nullable: true }
+        definition:  { $ref: "#/components/schemas/RuleDefinition" }
+
+    RuleExecution:
+      type: object
+      properties:
+        id:            { type: string, format: uuid }
+        rule_id:       { type: string, format: uuid }
+        triggered_at:  { type: string, format: date-time }
+        action_taken:  { type: object, additionalProperties: true }
+        result:        { type: string, enum: [success, partial, failure, skipped] }
+        error_message: { type: string, nullable: true }
+        latency_ms:    { type: integer }
+
+    # --- Alarmes -----------------------------------------------------------
+    Alarm:
+      type: object
+      properties:
+        id:                 { type: string, format: uuid }
+        tenant_id:          { type: string, format: uuid }
+        site_id:            { type: string, format: uuid }
+        rule_id:            { type: string, format: uuid }
+        rule_name:          { type: string }
+        device_id:          { type: string, format: uuid, nullable: true }
+        device_slug:        { type: string, nullable: true }
+        device_name:        { type: string, nullable: true }
+        zone_id:            { type: string, format: uuid, nullable: true }
+        zone_name:          { type: string, nullable: true }
+        label:              { type: string, example: "Dépassement de seuil" }
+        name:               { type: string }
+        description:        { type: string, nullable: true }
+        severity:           { type: string, enum: [minor, major, critical] }
+        model:              { type: string, default: "Standard" }
+        status_text:        { type: string, nullable: true, example: "Comportement anormal" }
+        state:              { type: string, enum: [triggered, acknowledged, resolved, archived] }
+        attribute:          { type: string, nullable: true, example: "temperature" }
+        trigger_count:      { type: integer }
+        last_value:         { type: number, nullable: true }
+        unit:               { type: string, nullable: true }
+        opened_at:          { type: string, format: date-time }
+        last_triggered_at:  { type: string, format: date-time }
+        acked_at:           { type: string, format: date-time, nullable: true }
+        resolved_at:        { type: string, format: date-time, nullable: true }
+        archived_at:        { type: string, format: date-time, nullable: true }
+        ack_user_email:     { type: string, nullable: true }
+        resolve_user_email: { type: string, nullable: true }
+
+    AlarmEvent:
+      type: object
+      properties:
+        id:            { type: string, format: uuid }
+        alarm_id:      { type: string, format: uuid }
+        ts:            { type: string, format: date-time }
+        state:         { type: string, enum: [triggered, acknowledged, resolved, archived] }
+        severity:      { type: string, enum: [minor, major, critical] }
+        description:   { type: string, nullable: true }
+        trigger_count: { type: integer, nullable: true }
+        value:         { type: number, nullable: true }
+        user_email:    { type: string, nullable: true }
+
+    AlarmComment:
+      type: object
+      properties:
+        id:         { type: string, format: uuid }
+        alarm_id:   { type: string, format: uuid }
+        user_email: { type: string, nullable: true }
+        body:       { type: string }
+        created_at: { type: string, format: date-time }
