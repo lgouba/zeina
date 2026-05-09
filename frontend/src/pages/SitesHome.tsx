@@ -186,6 +186,11 @@ function SiteFormModal({ mode, site, onClose, onSaved }: {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // slugDirty : passe à true dès que l'admin modifie manuellement le champ
+  // slug. Tant que false, le slug se régénère automatiquement à chaque
+  // frappe dans Nom. En édition on n'auto-remplit pas (slug verrouillé).
+  const [slugDirty, setSlugDirty] = useState(mode === "edit");
+
   // Auto-slug à partir du nom (uniquement en création).
   function autoSlug(n: string) {
     return n.toLowerCase()
@@ -234,9 +239,12 @@ function SiteFormModal({ mode, site, onClose, onSaved }: {
         <div className="p-5 space-y-4">
           <Field label="Nom *">
             <input value={name} onChange={(e) => {
-              setName(e.target.value);
-              if (mode === "create" && !slug) {
-                // Pré-remplit le slug pendant la frappe initiale.
+              const v = e.target.value;
+              setName(v);
+              // Tant que l'admin n'a pas touché Slug manuellement, on le
+              // synchronise sur le nom.
+              if (mode === "create" && !slugDirty) {
+                setSlug(autoSlug(v));
               }
             }} required placeholder="ex: Agence Bobo-Dioulasso" className={inputCls} />
           </Field>
@@ -245,12 +253,18 @@ function SiteFormModal({ mode, site, onClose, onSaved }: {
               <>
                 <p>Identifiant court utilisé dans les topics MQTT et les URL : <code className="font-mono">qlab/&lt;tenant&gt;/&lt;slug&gt;/...</code></p>
                 <p className="mt-1">Uniquement minuscules, chiffres et tirets. Ne peut plus changer après création.</p>
+                <p className="mt-1">Auto-généré depuis le nom — éditable si vous voulez l'imposer.</p>
               </>
             }>
-              <input value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase())} required
-                placeholder={name ? autoSlug(name) : "agence-bobo"} className={inputCls + " font-mono"} />
+              <input value={slug} onChange={(e) => {
+                setSlug(e.target.value.toLowerCase());
+                setSlugDirty(true);
+              }} required
+                placeholder="agence-bobo" className={inputCls + " font-mono"} />
               <div className="text-[10px] text-slate-400 mt-0.5">
-                {slug ? `qlab/<tenant>/${slug}/...` : `Auto-généré à partir du nom si vide.`}
+                {slug
+                  ? <>qlab/&lt;tenant&gt;/<span className="text-slate-500">{slug}</span>/…</>
+                  : "Auto-généré à partir du nom."}
               </div>
             </Field>
           )}
