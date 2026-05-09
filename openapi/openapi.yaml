@@ -1462,13 +1462,13 @@ components:
 
     SiteSummary:
       type: object
+      description: Compteurs simples affichés sur les cartes de la page d'accueil.
       properties:
-        site_id:             { type: string, format: uuid }
-        devices_total:       { type: integer }
-        devices_online:      { type: integer }
-        energy_day_wh:       { type: number, nullable: true }
-        temperature_avg:     { type: number, nullable: true }
-        occupancy_ratio_24h: { type: number, nullable: true }
+        site_id:       { type: string, format: uuid }
+        devices_total: { type: integer, description: "Nombre total d'équipements rattachés au site (toutes zones)" }
+        rules_total:   { type: integer, description: "Nombre de règles configurées sur le site" }
+        alarms_total:  { type: integer, description: "Nombre total d'alarmes du site (tous statuts confondus)" }
+        widgets_total: { type: integer, description: "Somme des widgets sur tous les dashboards du site" }
 
     # --- Users / Roles / Members --------------------------------------------
     UserListItem:

@@ -188,14 +188,18 @@ func (h *SitesHandler) Tree(c echo.Context) error {
 	return c.JSON(http.StatusOK, treeOut{siteOut: s, Zones: zones})
 }
 
-// Summary — KPI agrégés simples sur les dernières 24h.
+// Summary — compteurs simples par site, affichés sur les cartes de SitesHome.
+//
+// Volontairement universel (n'importe quel site, même sans capteurs
+// environnement, a des règles / alarmes / widgets). Les KPIs métiers
+// (énergie, température, occupation) ont été retirés au profit de quatre
+// compteurs lisibles d'un coup d'œil.
 type siteSummary struct {
-	SiteID            uuid.UUID `json:"site_id"`
-	DevicesTotal      int       `json:"devices_total"`
-	DevicesOnline     int       `json:"devices_online"`
-	EnergyDayWh       *float64  `json:"energy_day_wh,omitempty"`       // somme deltas base
-	TempAvg           *float64  `json:"temperature_avg,omitempty"`     // moyenne T° dernière heure
-	OccupancyRatio24H *float64  `json:"occupancy_ratio_24h,omitempty"` // % temps présence=1
+	SiteID       uuid.UUID `json:"site_id"`
+	DevicesTotal int       `json:"devices_total"`
+	RulesTotal   int       `json:"rules_total"`
+	AlarmsTotal  int       `json:"alarms_total"`  // toutes alarmes, tous statuts confondus
+	WidgetsTotal int       `json:"widgets_total"` // somme sur tous les dashboards du site
 }
 
 func (h *SitesHandler) Summary(c echo.Context) error {
@@ -217,55 +221,22 @@ func (h *SitesHandler) Summary(c echo.Context) error {
 
 	out := siteSummary{SiteID: id}
 
-	// Devices counts
-	err = h.pool.QueryRow(ctx, `
-		SELECT count(*), count(*) FILTER (WHERE status = 'online'::device_status)
-		FROM devices d JOIN zones z ON z.id = d.zone_id
-		WHERE z.site_id = $1`, id).Scan(&out.DevicesTotal, &out.DevicesOnline)
-	if err != nil {
-		return apperr.Wrap(apperr.KindInternal, "device counts", err)
-	}
-
-	// Energy : delta max−min sur l'index `base` des 24 dernières heures, sommé sur tous les Linky du site.
-	var energy *float64
-	err = h.pool.QueryRow(ctx, `
-		WITH per_device AS (
-			SELECT m.device_id, max(m.value) - min(m.value) AS delta
-			FROM measurements m
-			JOIN devices d ON d.id = m.device_id
-			JOIN zones z ON z.id = d.zone_id
-			WHERE z.site_id = $1 AND m.measurement = 'base' AND m.ts > now() - interval '24 hours'
-			GROUP BY m.device_id
-		)
-		SELECT sum(delta) FROM per_device`, id).Scan(&energy)
-	if err == nil && energy != nil {
-		out.EnergyDayWh = energy
-	}
-
-	// Température moyenne dernière heure
-	var tavg *float64
-	err = h.pool.QueryRow(ctx, `
-		SELECT avg(m.value)
-		FROM measurements m
-		JOIN devices d ON d.id = m.device_id
-		JOIN zones z ON z.id = d.zone_id
-		WHERE z.site_id = $1 AND m.measurement = 'temperature' AND m.ts > now() - interval '1 hour'`,
-		id).Scan(&tavg)
-	if err == nil && tavg != nil {
-		out.TempAvg = tavg
-	}
-
-	// Occupation : moyenne sur tous les PIR sur 24h
-	var occ *float64
-	err = h.pool.QueryRow(ctx, `
-		SELECT avg(m.value)
-		FROM measurements m
-		JOIN devices d ON d.id = m.device_id
-		JOIN zones z ON z.id = d.zone_id
-		WHERE z.site_id = $1 AND m.measurement = 'presence' AND m.ts > now() - interval '24 hours'`,
-		id).Scan(&occ)
-	if err == nil && occ != nil {
-		out.OccupancyRatio24H = occ
+	// Une seule requête avec sous-selects → roundtrip réduit.
+	const q = `
+		SELECT
+		    (SELECT count(*) FROM devices d
+		       JOIN zones z ON z.id = d.zone_id
+		       WHERE z.site_id = $1)                                    AS devices_total,
+		    (SELECT count(*) FROM rules WHERE site_id = $1)             AS rules_total,
+		    (SELECT count(*) FROM alarms WHERE site_id = $1)            AS alarms_total,
+		    (SELECT count(*) FROM dashboard_widgets dw
+		       JOIN dashboards d ON d.id = dw.dashboard_id
+		       WHERE d.site_id = $1)                                    AS widgets_total
+	`
+	if err := h.pool.QueryRow(ctx, q, id).Scan(
+		&out.DevicesTotal, &out.RulesTotal, &out.AlarmsTotal, &out.WidgetsTotal,
+	); err != nil {
+		return apperr.Wrap(apperr.KindInternal, "site summary counts", err)
 	}
 
 	return c.JSON(http.StatusOK, out)

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Building2, MapPin, Plus, Pencil, Trash2, X } from "lucide-react";
+import { Building2, MapPin, Plus, Pencil, Trash2, X, Cpu, Sparkles, Bell, LayoutDashboard } from "lucide-react";
 import { api, HttpError } from "../lib/api";
 import { useAuth, useIsTenantAdmin } from "../lib/auth";
 import { Help } from "../components/Tooltip";
@@ -150,10 +150,10 @@ function SiteCard({ site, summary, canManage, onEdit, onDelete }: {
         </div>
         {summary && (
           <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-            <Stat label="Équipements" value={`${summary.devices_online}/${summary.devices_total}`} />
-            <Stat label="Conso 24h"   value={summary.energy_day_wh != null ? `${(summary.energy_day_wh / 1000).toFixed(2)} kWh` : "—"} />
-            <Stat label="T° moy 1h"   value={summary.temperature_avg != null ? `${summary.temperature_avg.toFixed(1)}°C` : "—"} />
-            <Stat label="Occupation"  value={summary.occupancy_ratio_24h != null ? `${(summary.occupancy_ratio_24h * 100).toFixed(0)}%` : "—"} />
+            <Stat icon={<Cpu className="h-3.5 w-3.5" />}             label="Équipements" value={summary.devices_total} />
+            <Stat icon={<Sparkles className="h-3.5 w-3.5" />}        label="Règles"      value={summary.rules_total} />
+            <Stat icon={<Bell className="h-3.5 w-3.5" />}            label="Alarmes"     value={summary.alarms_total} />
+            <Stat icon={<LayoutDashboard className="h-3.5 w-3.5" />} label="Widgets"     value={summary.widgets_total} />
           </div>
         )}
       </Link>
@@ -161,11 +161,14 @@ function SiteCard({ site, summary, canManage, onEdit, onDelete }: {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
   return (
-    <div>
-      <div className="text-slate-500">{label}</div>
-      <div className="text-sm text-slate-900 dark:text-slate-100 font-medium">{value}</div>
+    <div className="flex items-center gap-2">
+      <div className="text-slate-400 dark:text-slate-500 shrink-0">{icon}</div>
+      <div className="min-w-0">
+        <div className="text-[11px] text-slate-500">{label}</div>
+        <div className="text-sm text-slate-900 dark:text-slate-100 font-semibold tabular-nums">{value}</div>
+      </div>
     </div>
   );
 }

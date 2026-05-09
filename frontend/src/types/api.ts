@@ -127,10 +127,9 @@ export interface Zone {
 export interface SiteSummary {
   site_id: string;
   devices_total: number;
-  devices_online: number;
-  energy_day_wh?: number | null;
-  temperature_avg?: number | null;
-  occupancy_ratio_24h?: number | null;
+  rules_total: number;
+  alarms_total: number;
+  widgets_total: number;
 }
 
 export type DeviceType =
