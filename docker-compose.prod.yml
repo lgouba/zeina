@@ -85,6 +85,27 @@ services:
   # ---------------------------------------------------------------------------
   rules-engine:
     ports: !reset []
+    environment:
+      DATABASE_URL:        postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}?sslmode=disable
+      MQTT_BROKER:         tcp://mosquitto:1883
+      MQTT_USER:           ${MQTT_RULES_USER}
+      MQTT_PASSWORD:       ${MQTT_RULES_PASSWORD}
+      REDIS_URL:           ${REDIS_URL:-redis://redis:6379/0}
+      RULES_METRICS_PORT:  ${RULES_METRICS_PORT:-9091}
+      LOG_LEVEL:           ${LOG_LEVEL:-info}
+      LOG_FORMAT:          ${LOG_FORMAT:-json}
+      # SMTP — actions email du moteur de règles (stub si SMTP_HOST vide)
+      SMTP_HOST:           ${SMTP_HOST:-}
+      SMTP_PORT:           ${SMTP_PORT:-587}
+      SMTP_USERNAME:       ${SMTP_USERNAME:-}
+      SMTP_PASSWORD:       ${SMTP_PASSWORD:-}
+      SMTP_FROM:           ${SMTP_FROM:-}
+      SMTP_FROM_NAME:      ${SMTP_FROM_NAME:-ZEINA Hyperviseur}
+      SMTP_TLS:            ${SMTP_TLS:-starttls}
+      # SMS webhook (générique POST JSON — laisser vide pour stub mode)
+      SMS_WEBHOOK_URL:     ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_AUTH:    ${SMS_WEBHOOK_AUTH:-}
+      SMS_WEBHOOK_HEADER:  ${SMS_WEBHOOK_HEADER:-}
     networks: [zeina]
 
   ingestor:
