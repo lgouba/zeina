@@ -20,17 +20,22 @@ ON CONFLICT (slug) DO NOTHING;
 -- User admin — bcrypt("admin123") généré avec :
 --   htpasswd -bnBC 10 "" "admin123" | tr -d ':\n'
 -- (10 rounds, le coût par défaut de bcrypt.DefaultCost en Go)
+-- Depuis la migration 0008 : tenant_role + is_superadmin (plus de colonne role).
 -- ---------------------------------------------------------------------------
-INSERT INTO users (id, tenant_id, email, password_hash, role, full_name)
+INSERT INTO users (id, tenant_id, email, password_hash, full_name, tenant_role, is_superadmin)
 VALUES (
     '22222222-2222-2222-2222-222222222222',
     '11111111-1111-1111-1111-111111111111',
     'admin@acme.test',
     '$2a$10$mOfe2SYu.0sacjn0gA.XbezGClClhBUYO9r1Ob17XDanv8hTbOwPy',
-    'admin',
-    'Demo Admin'
+    'Demo Admin',
+    'owner',
+    true
 )
-ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;
+ON CONFLICT (email) DO UPDATE SET
+    password_hash = EXCLUDED.password_hash,
+    tenant_role   = EXCLUDED.tenant_role,
+    is_superadmin = EXCLUDED.is_superadmin;
 
 -- ---------------------------------------------------------------------------
 -- Site
