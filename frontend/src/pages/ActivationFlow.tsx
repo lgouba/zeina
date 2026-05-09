@@ -112,33 +112,33 @@ export function ActivationFlow({ purpose, title, intro }: Props) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-sm space-y-6 bg-slate-900 rounded-2xl p-8 border border-slate-800 shadow-2xl">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+      <div className="w-full max-w-sm space-y-6 bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl dark:shadow-2xl">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-brand-500/10 p-2">
-            <Activity className="h-7 w-7 text-brand-400" />
+            <Activity className="h-7 w-7 text-brand-500 dark:text-brand-400" />
           </div>
           <div>
             <h1 className="text-xl font-semibold">{title}</h1>
-            <p className="text-xs text-slate-400">{intro}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{intro}</p>
           </div>
         </div>
 
         {step === 1 && (
           <form onSubmit={submitCode} className="space-y-4">
             <label className="block">
-              <span className="text-xs text-slate-400">Email</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">Email</span>
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
                 placeholder="vous@exemple.fr"
-                className="mt-1 block w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
+                className="mt-1 block w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
             </label>
             <label className="block">
-              <span className="text-xs text-slate-400">Code reçu par email (6 chiffres)</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">Code reçu par email (6 chiffres)</span>
               <input id="code-input" type="text" inputMode="numeric" pattern="\d{6}" required
                 value={code} maxLength={6}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 placeholder="••••••"
-                className="mt-1 block w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-3 text-center text-2xl font-mono tracking-[0.5em] focus:border-brand-500 focus:outline-none" />
+                className="mt-1 block w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-3 text-center text-2xl font-mono tracking-[0.5em] focus:border-brand-500 focus:outline-none" />
             </label>
 
             {error && <ErrorBox msg={error} />}
@@ -152,23 +152,23 @@ export function ActivationFlow({ purpose, title, intro }: Props) {
 
         {step === 2 && (
           <form onSubmit={submitPassword} className="space-y-4">
-            <div className="flex items-center gap-2 text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
+            <div className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
               <span>Code vérifié. Définissez votre mot de passe.</span>
             </div>
 
             <label className="block">
-              <span className="text-xs text-slate-400">Nouveau mot de passe</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">Nouveau mot de passe</span>
               <input type="password" required minLength={8} value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 block w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
-              <span className="mt-1 block text-[11px] text-slate-500">Minimum 8 caractères.</span>
+                className="mt-1 block w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
+              <span className="mt-1 block text-[11px] text-slate-400">Minimum 8 caractères.</span>
             </label>
             <label className="block">
-              <span className="text-xs text-slate-400">Confirmer</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">Confirmer</span>
               <input type="password" required minLength={8} value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                className="mt-1 block w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
+                className="mt-1 block w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
             </label>
 
             {error && <ErrorBox msg={error} />}
@@ -180,7 +180,7 @@ export function ActivationFlow({ purpose, title, intro }: Props) {
           </form>
         )}
 
-        <Link to="/login" className="flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-slate-200">
+        <Link to="/login" className="flex items-center justify-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
           <ArrowLeft className="h-3 w-3" /> Retour à la connexion
         </Link>
       </div>
@@ -189,5 +189,5 @@ export function ActivationFlow({ purpose, title, intro }: Props) {
 }
 
 function ErrorBox({ msg }: { msg: string }) {
-  return <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{msg}</div>;
+  return <div className="text-sm text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{msg}</div>;
 }

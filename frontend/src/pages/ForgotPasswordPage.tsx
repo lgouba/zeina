@@ -48,38 +48,38 @@ function RequestEmailForm({ onSent }: { onSent: (email: string) => void }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <form onSubmit={submit}
-        className="w-full max-w-sm space-y-6 bg-slate-900 rounded-2xl p-8 border border-slate-800 shadow-2xl">
+        className="w-full max-w-sm space-y-6 bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl dark:shadow-2xl">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-brand-500/10 p-2">
-            <Activity className="h-7 w-7 text-brand-400" />
+            <Activity className="h-7 w-7 text-brand-500 dark:text-brand-400" />
           </div>
           <div>
             <h1 className="text-xl font-semibold">Mot de passe oublié</h1>
-            <p className="text-xs text-slate-400">Recevez un code de réinitialisation</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Recevez un code de réinitialisation</p>
           </div>
         </div>
 
-        <div className="flex items-start gap-2 text-xs text-slate-400 bg-slate-800/50 rounded-lg p-3">
+        <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/50 rounded-lg p-3">
           <MailCheck className="h-4 w-4 text-slate-500 shrink-0 mt-0.5" />
           <span>Si un compte existe pour cet email, un code à 6 chiffres vous sera envoyé. Le code expire après 15 minutes.</span>
         </div>
 
         <label className="block">
-          <span className="text-xs text-slate-400">Email</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">Email</span>
           <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 block w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
+            className="mt-1 block w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
         </label>
 
-        {error && <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{error}</div>}
+        {error && <div className="text-sm text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{error}</div>}
 
         <button type="submit" disabled={loading || !email}
           className="w-full rounded-lg bg-brand-500 hover:bg-brand-400 disabled:opacity-50 px-4 py-2 text-sm font-medium text-white transition">
           {loading ? "Envoi…" : "Envoyer le code"}
         </button>
 
-        <Link to="/login" className="flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-slate-200">
+        <Link to="/login" className="flex items-center justify-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
           <ArrowLeft className="h-3 w-3" /> Retour à la connexion
         </Link>
       </form>
