@@ -39,6 +39,17 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Str("path", *configPath).Msg("load config")
 	}
+	// Override des creds MQTT via env (utile en prod où les passwords sont
+	// générés aléatoirement et injectés via le compose).
+	if v := os.Getenv("MQTT_BROKER"); v != "" {
+		cfg.Broker = v
+	}
+	if v := os.Getenv("MQTT_USER"); v != "" {
+		cfg.Username = v
+	}
+	if v := os.Getenv("MQTT_PASSWORD"); v != "" {
+		cfg.Password = v
+	}
 	log.Info().
 		Str("broker", cfg.Broker).
 		Str("tenant", cfg.Tenant).

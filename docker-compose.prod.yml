@@ -100,6 +100,13 @@ services:
     networks: [zeina]
 
   simulator:
+    environment:
+      LOG_LEVEL:        ${LOG_LEVEL:-info}
+      LOG_FORMAT:       ${LOG_FORMAT:-json}
+      SIMULATOR_CONFIG: /etc/simulator/simulator.yml
+      MQTT_BROKER:      tcp://mosquitto:1883
+      MQTT_USER:        ${MQTT_SIMULATOR_USER}
+      MQTT_PASSWORD:    ${MQTT_SIMULATOR_PASSWORD}
     networks: [zeina]
 
   migrate:
