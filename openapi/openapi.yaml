@@ -1432,7 +1432,11 @@ components:
       properties:
         id:            { type: string, format: uuid }
         email:         { type: string, format: email }
-        full_name:     { type: string, nullable: true }
+        first_name:    { type: string, nullable: true }
+        last_name:     { type: string, nullable: true }
+        full_name:     { type: string, nullable: true, description: "Dérivé via trigger DB (first_name + last_name)" }
+        job_title:     { type: string, nullable: true }
+        phone:         { type: string, nullable: true }
         tenant_role:   { type: string, enum: [owner, member] }
         is_superadmin: { type: boolean }
         status:        { type: string, enum: [pending, active, disabled], description: "pending = activation par email en attente, active = compte utilisable, disabled = login bloqué" }
@@ -1445,7 +1449,11 @@ components:
       properties:
         email:         { type: string, format: email }
         password:      { type: string, format: password, description: "Optionnel (legacy). Vide = user en pending + mail d'activation envoyé." }
-        full_name:     { type: string, nullable: true }
+        first_name:    { type: string, nullable: true }
+        last_name:     { type: string, nullable: true }
+        full_name:     { type: string, nullable: true, description: "Ignoré si first_name/last_name fournis." }
+        job_title:     { type: string, nullable: true }
+        phone:         { type: string, nullable: true }
         tenant_role:   { type: string, enum: [owner, member], default: member }
         is_superadmin: { type: boolean, default: false, description: "Ignoré si l'appelant n'est pas superadmin" }
 
@@ -1459,7 +1467,11 @@ components:
     UpdateUserReq:
       type: object
       properties:
-        full_name:     { type: string, nullable: true }
+        first_name:    { type: string, nullable: true }
+        last_name:     { type: string, nullable: true }
+        full_name:     { type: string, nullable: true, description: "Ignoré si first_name/last_name fournis." }
+        job_title:     { type: string, nullable: true }
+        phone:         { type: string, nullable: true }
         tenant_role:   { type: string, enum: [owner, member] }
         is_superadmin: { type: boolean, description: "Modifiable uniquement par un superadmin" }
         status:        { type: string, enum: [pending, active, disabled] }

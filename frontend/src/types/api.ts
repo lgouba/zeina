@@ -54,7 +54,11 @@ export interface Role {
 export interface UserListItem {
   id: string;
   email: string;
+  first_name?: string | null;
+  last_name?: string | null;
   full_name?: string | null;
+  job_title?: string | null;
+  phone?: string | null;
   tenant_role: "owner" | "member";
   is_superadmin: boolean;
   status: "pending" | "active" | "disabled";

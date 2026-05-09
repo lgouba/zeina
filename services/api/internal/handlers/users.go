@@ -69,7 +69,11 @@ func (h *UsersHandler) Register(g *echo.Group) {
 type userListOut struct {
 	ID           uuid.UUID  `json:"id"`
 	Email        string     `json:"email"`
-	FullName     *string    `json:"full_name,omitempty"`
+	FirstName    *string    `json:"first_name,omitempty"`
+	LastName     *string    `json:"last_name,omitempty"`
+	FullName     *string    `json:"full_name,omitempty"` // dérivé via trigger DB
+	JobTitle     *string    `json:"job_title,omitempty"`
+	Phone        *string    `json:"phone,omitempty"`
 	TenantRole   string     `json:"tenant_role"`
 	IsSuperadmin bool       `json:"is_superadmin"`
 	Status       string     `json:"status"` // pending | active | disabled
@@ -88,14 +92,14 @@ func (h *UsersHandler) List(c echo.Context) error {
 		rows pgx.Rows
 		err  error
 	)
+	const cols = `id, email, first_name, last_name, full_name, job_title, phone,
+	              tenant_role::text, is_superadmin, status::text, last_login_at, created_at`
 	if caller.IsSuperadmin && c.QueryParam("all") == "1" {
 		rows, err = h.pool.Query(c.Request().Context(),
-			`SELECT id, email, full_name, tenant_role::text, is_superadmin, status::text, last_login_at, created_at
-			 FROM users ORDER BY created_at DESC`)
+			`SELECT `+cols+` FROM users ORDER BY created_at DESC`)
 	} else {
 		rows, err = h.pool.Query(c.Request().Context(),
-			`SELECT id, email, full_name, tenant_role::text, is_superadmin, status::text, last_login_at, created_at
-			 FROM users WHERE tenant_id = $1 ORDER BY created_at DESC`, tid)
+			`SELECT `+cols+` FROM users WHERE tenant_id = $1 ORDER BY created_at DESC`, tid)
 	}
 	if err != nil {
 		return apperr.Wrap(apperr.KindInternal, "list users", err)
@@ -106,7 +110,9 @@ func (h *UsersHandler) List(c echo.Context) error {
 	for rows.Next() {
 		var u userListOut
 		var lastLogin *time.Time
-		if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.TenantRole, &u.IsSuperadmin, &u.Status, &lastLogin, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.FullName,
+			&u.JobTitle, &u.Phone,
+			&u.TenantRole, &u.IsSuperadmin, &u.Status, &lastLogin, &u.CreatedAt); err != nil {
 			return apperr.Wrap(apperr.KindInternal, "scan user", err)
 		}
 		u.LastLoginAt = lastLogin
@@ -116,7 +122,13 @@ func (h *UsersHandler) List(c echo.Context) error {
 }
 
 type createUserReq struct {
-	Email    string  `json:"email"`
+	Email     string  `json:"email"`
+	FirstName *string `json:"first_name,omitempty"`
+	LastName  *string `json:"last_name,omitempty"`
+	JobTitle  *string `json:"job_title,omitempty"`
+	Phone     *string `json:"phone,omitempty"`
+	// FullName : ignoré si first_name/last_name fournis (recalculé par trigger).
+	// Maintenu pour la rétrocompat.
 	FullName *string `json:"full_name,omitempty"`
 	// TenantRole : owner | member (défaut member). Owner ⇒ accès implicite à tous les sites.
 	TenantRole   string `json:"tenant_role,omitempty"`
@@ -166,16 +178,21 @@ func (h *UsersHandler) Create(c echo.Context) error {
 	}
 
 	// Mode normal : status=pending, password_hash=NULL, mail d'activation.
+	// full_name est recalculé par le trigger si first_name/last_name sont fournis.
 	const q = `
-		INSERT INTO users (tenant_id, email, full_name, tenant_role, is_superadmin, status)
-		VALUES ($1, $2, $3, $4::tenant_role, $5, 'pending')
-		RETURNING id, email, full_name, tenant_role::text, is_superadmin, status::text, last_login_at, created_at
+		INSERT INTO users (tenant_id, email, first_name, last_name, full_name, job_title, phone, tenant_role, is_superadmin, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::tenant_role, $9, 'pending')
+		RETURNING id, email, first_name, last_name, full_name, job_title, phone,
+		          tenant_role::text, is_superadmin, status::text, last_login_at, created_at
 	`
 	var u userListOut
 	var lastLogin *time.Time
 	err := h.pool.QueryRow(ctx, q,
-		tid, req.Email, req.FullName, req.TenantRole, req.IsSuperadmin,
-	).Scan(&u.ID, &u.Email, &u.FullName, &u.TenantRole, &u.IsSuperadmin, &u.Status, &lastLogin, &u.CreatedAt)
+		tid, req.Email, req.FirstName, req.LastName, req.FullName,
+		req.JobTitle, req.Phone, req.TenantRole, req.IsSuperadmin,
+	).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.FullName,
+		&u.JobTitle, &u.Phone,
+		&u.TenantRole, &u.IsSuperadmin, &u.Status, &lastLogin, &u.CreatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return apperr.Validation("email already used")
@@ -208,15 +225,20 @@ func (h *UsersHandler) createWithPassword(c echo.Context, tid uuid.UUID, req cre
 		return apperr.Wrap(apperr.KindInternal, "bcrypt", err)
 	}
 	const q = `
-		INSERT INTO users (tenant_id, email, password_hash, full_name, tenant_role, is_superadmin, status)
-		VALUES ($1, $2, $3, $4, $5::tenant_role, $6, 'active')
-		RETURNING id, email, full_name, tenant_role::text, is_superadmin, status::text, last_login_at, created_at
+		INSERT INTO users (tenant_id, email, password_hash, first_name, last_name, full_name, job_title, phone, tenant_role, is_superadmin, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::tenant_role, $10, 'active')
+		RETURNING id, email, first_name, last_name, full_name, job_title, phone,
+		          tenant_role::text, is_superadmin, status::text, last_login_at, created_at
 	`
 	var u userListOut
 	var lastLogin *time.Time
 	err = h.pool.QueryRow(c.Request().Context(), q,
-		tid, req.Email, string(hash), req.FullName, req.TenantRole, req.IsSuperadmin,
-	).Scan(&u.ID, &u.Email, &u.FullName, &u.TenantRole, &u.IsSuperadmin, &u.Status, &lastLogin, &u.CreatedAt)
+		tid, req.Email, string(hash),
+		req.FirstName, req.LastName, req.FullName, req.JobTitle, req.Phone,
+		req.TenantRole, req.IsSuperadmin,
+	).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.FullName,
+		&u.JobTitle, &u.Phone,
+		&u.TenantRole, &u.IsSuperadmin, &u.Status, &lastLogin, &u.CreatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return apperr.Validation("email already used")
@@ -331,7 +353,11 @@ func (h *UsersHandler) ResendActivation(c echo.Context) error {
 }
 
 type updateUserReq struct {
-	FullName     *string `json:"full_name,omitempty"`
+	FirstName    *string `json:"first_name,omitempty"`
+	LastName     *string `json:"last_name,omitempty"`
+	FullName     *string `json:"full_name,omitempty"` // ignoré si first/last fournis (trigger)
+	JobTitle     *string `json:"job_title,omitempty"`
+	Phone        *string `json:"phone,omitempty"`
 	TenantRole   *string `json:"tenant_role,omitempty"`
 	IsSuperadmin *bool   `json:"is_superadmin,omitempty"`
 	Status       *string `json:"status,omitempty"` // pending | active | disabled
@@ -375,19 +401,26 @@ func (h *UsersHandler) Update(c echo.Context) error {
 
 	const q = `
 		UPDATE users SET
-			full_name     = COALESCE($2, full_name),
-			tenant_role   = COALESCE($3::tenant_role, tenant_role),
-			is_superadmin = COALESCE($4, is_superadmin),
-			status        = COALESCE($5::user_status, status),
+			first_name    = COALESCE($2, first_name),
+			last_name     = COALESCE($3, last_name),
+			job_title     = COALESCE($4, job_title),
+			phone         = COALESCE($5, phone),
+			tenant_role   = COALESCE($6::tenant_role, tenant_role),
+			is_superadmin = COALESCE($7, is_superadmin),
+			status        = COALESCE($8::user_status, status),
 			updated_at    = now()
 		WHERE id = $1
-		RETURNING id, email, full_name, tenant_role::text, is_superadmin, status::text, last_login_at, created_at
+		RETURNING id, email, first_name, last_name, full_name, job_title, phone,
+		          tenant_role::text, is_superadmin, status::text, last_login_at, created_at
 	`
 	var u userListOut
 	var lastLogin *time.Time
 	if err := h.pool.QueryRow(c.Request().Context(), q,
-		uid, req.FullName, req.TenantRole, req.IsSuperadmin, req.Status,
-	).Scan(&u.ID, &u.Email, &u.FullName, &u.TenantRole, &u.IsSuperadmin, &u.Status, &lastLogin, &u.CreatedAt); err != nil {
+		uid, req.FirstName, req.LastName, req.JobTitle, req.Phone,
+		req.TenantRole, req.IsSuperadmin, req.Status,
+	).Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.FullName,
+		&u.JobTitle, &u.Phone,
+		&u.TenantRole, &u.IsSuperadmin, &u.Status, &lastLogin, &u.CreatedAt); err != nil {
 		return apperr.Wrap(apperr.KindInternal, "update user", err)
 	}
 	u.LastLoginAt = lastLogin
