@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2, X, Search, Map as MapIcon, List, Pen, Save, Loader2,
   Globe2, Building2, Building, Layers, DoorOpen, MoreVertical, Cpu,
-  Thermometer, Activity, Lightbulb, Zap, Gauge,
+  Thermometer, Activity, Lightbulb, Zap, Gauge, Network,
 } from "lucide-react";
 import clsx from "clsx";
 import { api, HttpError } from "../lib/api";
@@ -262,7 +262,7 @@ export function ZonesPage() {
       <header className="flex items-start justify-between mb-5 gap-4">
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-brand-500" /> Zones
+            <Network className="h-5 w-5 text-brand-500" /> Hiérarchie
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Arborescence du site : zones géographiques, bâtiments, étages, pièces.

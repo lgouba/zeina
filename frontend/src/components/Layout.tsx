@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
-import { Activity, Building2, Cpu, LayoutDashboard, LogOut, Wifi, WifiOff, Settings, ChevronDown, Sun, Moon, Sparkles, Users, ShieldCheck, UserCog, History, Bell } from "lucide-react";
+import { Activity, Building2, Cpu, LayoutDashboard, LogOut, Wifi, WifiOff, Settings, ChevronDown, Sun, Moon, Sparkles, Users, ShieldCheck, UserCog, History, Bell, Network } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { useAuth, useCanRead, useIsTenantAdmin } from "../lib/auth";
@@ -54,7 +54,7 @@ function Sidebar() {
         {siteId && (
           <>
             <div className="my-2 h-px w-8 bg-slate-200 dark:bg-slate-800" />
-            {canDevices    && <SidebarLink to={`/sites/${siteId}/zones`}      icon={<Building2 className="h-5 w-5" />}       label="Zones du site" />}
+            {canDevices    && <SidebarLink to={`/sites/${siteId}/zones`}      icon={<Network className="h-5 w-5" />}         label="Hiérarchie" />}
             {canDevices    && <SidebarLink to={`/sites/${siteId}/devices`}    icon={<Cpu className="h-5 w-5" />}             label="Équipements" />}
             {canDashboards && <SidebarLink to={`/sites/${siteId}/dashboards`} icon={<LayoutDashboard className="h-5 w-5" />} label="Tableaux de bord" />}
             {canRules      && <SidebarLink to={`/sites/${siteId}/rules`}      icon={<Sparkles className="h-5 w-5" />}        label="Règles" />}
