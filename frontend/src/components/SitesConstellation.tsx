@@ -237,12 +237,9 @@ function SiteOrb({ site, summary, x, y, orbSize, onClick }: {
         <div className={clsx("font-semibold text-white drop-shadow-lg group-hover:text-cyan-200 transition", labelSize)}>
           {site.name}
         </div>
-        {summary && orbSize >= 48 && (
-          <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-center gap-2">
-            <span>{summary.rules_total} règle{summary.rules_total > 1 ? "s" : ""}</span>
-            {hasAlarm && (
-              <span className="text-red-400 font-medium">· {summary.alarms_total} alarme{summary.alarms_total > 1 ? "s" : ""}</span>
-            )}
+        {hasAlarm && orbSize >= 48 && (
+          <div className="text-[10px] text-red-400 font-medium mt-0.5 text-center">
+            {summary?.alarms_total} alarme{(summary?.alarms_total || 0) > 1 ? "s" : ""}
           </div>
         )}
       </div>
