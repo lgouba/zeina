@@ -742,19 +742,24 @@ function ZoneFormModal({ mode, siteId, zone, initialKind, initialParent, initial
               placeholder="ex: Salle de réunion 1er étage" className={inputCls} />
           </Field>
 
-          <Field label="Parent" tooltip="Laisser vide pour une zone racine. Sinon, choisissez la zone qui contient celle-ci. Filtrée selon le type sélectionné.">
-            <select value={parentID || ""} onChange={(e) => setParentID(e.target.value || null)} className={inputCls}>
-              {canBeRoot && <option value="">— Aucun (racine du site) —</option>}
-              {parentOptions.map((z) => (
-                <option key={z.id} value={z.id}>{breadcrumb(z, allZones)}{` · ${KIND_META[z.kind].label}`}</option>
-              ))}
-            </select>
-            {!canBeRoot && parentOptions.length === 0 && (
-              <span className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5 block">
-                Aucun parent compatible — créez d'abord une {kind === "building" ? "zone géographique ou un groupe de bâtiments" : kind === "floor" ? "bâtiment" : "zone parente compatible"}.
-              </span>
-            )}
-          </Field>
+          {/* Parent — caché pour les zones qui ne peuvent qu'être racine (geographic),
+              ou quand le seul choix est "racine" sans alternative. Dans ces cas
+              l'utilisateur n'a aucune décision à prendre. */}
+          {!(canBeRoot && parentOptions.length === 0) && (
+            <Field label="Parent" tooltip="Laisser vide pour une zone racine. Sinon, choisissez la zone qui contient celle-ci. Filtrée selon le type sélectionné.">
+              <select value={parentID || ""} onChange={(e) => setParentID(e.target.value || null)} className={inputCls}>
+                {canBeRoot && <option value="">— Aucun (racine du site) —</option>}
+                {parentOptions.map((z) => (
+                  <option key={z.id} value={z.id}>{breadcrumb(z, allZones)}{` · ${KIND_META[z.kind].label}`}</option>
+                ))}
+              </select>
+              {!canBeRoot && parentOptions.length === 0 && (
+                <span className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5 block">
+                  Aucun parent compatible — créez d'abord une {kind === "building" ? "zone géographique ou un groupe de bâtiments" : kind === "floor" ? "bâtiment" : "zone parente compatible"}.
+                </span>
+              )}
+            </Field>
+          )}
 
           <Field label="Description">
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2}
