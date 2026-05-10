@@ -67,14 +67,18 @@ export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
           />
         ))}
 
-        {/* Couche 3 : lignes de connexion du hub vers chaque orbe */}
+        {/* Couche 3 : lignes de connexion du hub vers chaque orbe.
+            Gradient radial userSpaceOnUse → s'applique même aux lignes
+            verticales (bounding-box plat). */}
         <defs>
-          <linearGradient id="zeinaConnLine" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.7" />
-            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.2" />
-          </linearGradient>
+          <radialGradient id="zeinaConnLine" gradientUnits="userSpaceOnUse"
+            cx={size.w / 2} cy={size.h / 2} r={Math.min(size.w, size.h) * 0.5}>
+            <stop offset="0%"  stopColor="#06b6d4" stopOpacity="0.85" />
+            <stop offset="60%" stopColor="#6366f1" stopOpacity="0.55" />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.15" />
+          </radialGradient>
         </defs>
-        {positions.map((p) => (
+        {positions.map((p, i) => (
           <line
             key={p.site.id}
             x1={size.w / 2} y1={size.h / 2}
@@ -83,7 +87,7 @@ export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
             strokeWidth={1.5}
             strokeDasharray="6 8"
             className="zeina-connection"
-            style={{ animationDelay: `${(positions.indexOf(p) % 4) * 0.5}s` }}
+            style={{ animationDelay: `${(i % 4) * 0.5}s` }}
           />
         ))}
       </svg>
