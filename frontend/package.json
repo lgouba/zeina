@@ -21,7 +21,8 @@
     "lucide-react": "^0.460.0",
     "leaflet": "^1.9.4",
     "react-leaflet": "^4.2.1",
-    "leaflet-draw": "^1.0.4"
+    "leaflet-draw": "^1.0.4",
+    "@xyflow/react": "^12.3.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

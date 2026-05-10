@@ -42,15 +42,16 @@ func (h *RulesHandler) RegisterWrite(g *echo.Group) {
 // ----------------------------------------------------------------------------
 
 type ruleOut struct {
-	ID          uuid.UUID       `json:"id"`
-	TenantID    uuid.UUID       `json:"tenant_id"`
-	SiteID      uuid.UUID       `json:"site_id"`
-	Name        string          `json:"name"`
-	Description *string         `json:"description,omitempty"`
-	Enabled     bool            `json:"enabled"`
-	Definition  json.RawMessage `json:"definition"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ID              uuid.UUID       `json:"id"`
+	TenantID        uuid.UUID       `json:"tenant_id"`
+	SiteID          uuid.UUID       `json:"site_id"`
+	Name            string          `json:"name"`
+	Description     *string         `json:"description,omitempty"`
+	Enabled         bool            `json:"enabled"`
+	Definition      json.RawMessage `json:"definition"`
+	DefinitionGraph json.RawMessage `json:"definition_graph,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 type executionOut struct {
@@ -70,9 +71,9 @@ func (h *RulesHandler) ensureRuleVisible(c echo.Context, id uuid.UUID) (*ruleOut
 	tid := tenantID(c)
 	r := &ruleOut{}
 	err := h.pool.QueryRow(c.Request().Context(), `
-		SELECT id, tenant_id, site_id, name, description, enabled, definition, created_at, updated_at
+		SELECT id, tenant_id, site_id, name, description, enabled, definition, definition_graph, created_at, updated_at
 		FROM rules WHERE id = $1 AND tenant_id = $2`, id, tid).
-		Scan(&r.ID, &r.TenantID, &r.SiteID, &r.Name, &r.Description, &r.Enabled, &r.Definition, &r.CreatedAt, &r.UpdatedAt)
+		Scan(&r.ID, &r.TenantID, &r.SiteID, &r.Name, &r.Description, &r.Enabled, &r.Definition, &r.DefinitionGraph, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return nil, apperr.NotFound("rule")
 	}
@@ -88,7 +89,7 @@ func (h *RulesHandler) ListBySite(c echo.Context) error {
 	tid := tenantID(c)
 
 	rows, err := h.pool.Query(c.Request().Context(), `
-		SELECT id, tenant_id, site_id, name, description, enabled, definition, created_at, updated_at
+		SELECT id, tenant_id, site_id, name, description, enabled, definition, definition_graph, created_at, updated_at
 		FROM rules
 		WHERE site_id = $1 AND tenant_id = $2
 		ORDER BY created_at DESC`, siteID, tid)
@@ -100,7 +101,7 @@ func (h *RulesHandler) ListBySite(c echo.Context) error {
 	out := []ruleOut{}
 	for rows.Next() {
 		var r ruleOut
-		if err := rows.Scan(&r.ID, &r.TenantID, &r.SiteID, &r.Name, &r.Description, &r.Enabled, &r.Definition, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.SiteID, &r.Name, &r.Description, &r.Enabled, &r.Definition, &r.DefinitionGraph, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return apperr.Wrap(apperr.KindInternal, "scan", err)
 		}
 		out = append(out, r)
@@ -128,7 +129,11 @@ type createRuleReq struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Enabled     bool            `json:"enabled"`
-	Definition  json.RawMessage `json:"definition"`
+	// Definition (legacy linéaire). Optionnelle si definition_graph fourni
+	// — dans ce cas le backend la compile depuis le graph.
+	Definition json.RawMessage `json:"definition,omitempty"`
+	// DefinitionGraph (nouveau format visuel : nodes + edges).
+	DefinitionGraph json.RawMessage `json:"definition_graph,omitempty"`
 }
 
 func (h *RulesHandler) Create(c echo.Context) error {
@@ -140,8 +145,20 @@ func (h *RulesHandler) Create(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apperr.Validation("invalid body")
 	}
-	if req.Name == "" || len(req.Definition) == 0 {
-		return apperr.Validation("name and definition are required")
+	if req.Name == "" {
+		return apperr.Validation("name is required")
+	}
+
+	// Compile graph → definition si necessaire (le moteur lit `definition`).
+	if len(req.Definition) == 0 && len(req.DefinitionGraph) > 0 {
+		compiled, cerr := compileGraphToDefinition(req.DefinitionGraph)
+		if cerr != nil {
+			return apperr.Validation("invalid graph: " + cerr.Error())
+		}
+		req.Definition = compiled
+	}
+	if len(req.Definition) == 0 {
+		return apperr.Validation("definition or definition_graph is required")
 	}
 
 	tid := tenantID(c)
@@ -162,13 +179,18 @@ func (h *RulesHandler) Create(c echo.Context) error {
 		}
 	}
 
+	var graphArg interface{}
+	if len(req.DefinitionGraph) > 0 {
+		graphArg = []byte(req.DefinitionGraph)
+	}
+
 	var r ruleOut
 	err = h.pool.QueryRow(c.Request().Context(), `
-		INSERT INTO rules (tenant_id, site_id, name, description, enabled, definition, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-		RETURNING id, tenant_id, site_id, name, description, enabled, definition, created_at, updated_at`,
-		tid, siteID, req.Name, nullableText(req.Description), req.Enabled, []byte(req.Definition), createdBy).
-		Scan(&r.ID, &r.TenantID, &r.SiteID, &r.Name, &r.Description, &r.Enabled, &r.Definition, &r.CreatedAt, &r.UpdatedAt)
+		INSERT INTO rules (tenant_id, site_id, name, description, enabled, definition, definition_graph, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
+		RETURNING id, tenant_id, site_id, name, description, enabled, definition, definition_graph, created_at, updated_at`,
+		tid, siteID, req.Name, nullableText(req.Description), req.Enabled, []byte(req.Definition), graphArg, createdBy).
+		Scan(&r.ID, &r.TenantID, &r.SiteID, &r.Name, &r.Description, &r.Enabled, &r.Definition, &r.DefinitionGraph, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return apperr.Wrap(apperr.KindInternal, "insert rule", err)
 	}
@@ -176,10 +198,11 @@ func (h *RulesHandler) Create(c echo.Context) error {
 }
 
 type updateRuleReq struct {
-	Name        *string         `json:"name,omitempty"`
-	Description *string         `json:"description,omitempty"`
-	Enabled     *bool           `json:"enabled,omitempty"`
-	Definition  json.RawMessage `json:"definition,omitempty"`
+	Name            *string         `json:"name,omitempty"`
+	Description     *string         `json:"description,omitempty"`
+	Enabled         *bool           `json:"enabled,omitempty"`
+	Definition      json.RawMessage `json:"definition,omitempty"`
+	DefinitionGraph json.RawMessage `json:"definition_graph,omitempty"`
 }
 
 func (h *RulesHandler) Update(c echo.Context) error {
@@ -194,9 +217,20 @@ func (h *RulesHandler) Update(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apperr.Validation("invalid body")
 	}
-	var defBytes interface{} = nil
+	// Si on reçoit un graph mais pas de definition, on recompile.
+	if len(req.Definition) == 0 && len(req.DefinitionGraph) > 0 {
+		compiled, cerr := compileGraphToDefinition(req.DefinitionGraph)
+		if cerr != nil {
+			return apperr.Validation("invalid graph: " + cerr.Error())
+		}
+		req.Definition = compiled
+	}
+	var defBytes, graphBytes interface{}
 	if len(req.Definition) > 0 {
 		defBytes = []byte(req.Definition)
+	}
+	if len(req.DefinitionGraph) > 0 {
+		graphBytes = []byte(req.DefinitionGraph)
 	}
 	_, err = h.pool.Exec(c.Request().Context(), `
 		UPDATE rules SET
@@ -204,8 +238,9 @@ func (h *RulesHandler) Update(c echo.Context) error {
 		  description = COALESCE($3, description),
 		  enabled = COALESCE($4, enabled),
 		  definition = COALESCE($5::jsonb, definition),
+		  definition_graph = COALESCE($6::jsonb, definition_graph),
 		  updated_at = now()
-		WHERE id = $1`, id, req.Name, req.Description, req.Enabled, defBytes)
+		WHERE id = $1`, id, req.Name, req.Description, req.Enabled, defBytes, graphBytes)
 	if err != nil {
 		return apperr.Wrap(apperr.KindInternal, "update rule", err)
 	}
