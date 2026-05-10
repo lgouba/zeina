@@ -120,6 +120,67 @@ func (s *Store) Trigger(ctx context.Context, in TriggerInput) (uuid.UUID, bool, 
 	return id, true, err
 }
 
+// AutoResolveByRuleAndDevice — passe à 'resolved' toutes les alarmes encore
+// ouvertes (state IN ('triggered', 'acknowledged')) qui matchent (ruleID,
+// deviceSlug). Appelée par le moteur quand la mesure repasse sous le seuil
+// pour les règles edge-triggered. Retourne le nombre d'alarmes résolues.
+func (s *Store) AutoResolveByRuleAndDevice(ctx context.Context, ruleID uuid.UUID, tenantSlug, deviceSlug string, currentValue float64) (int, error) {
+	// Lookup device_id via tenant_slug + device_slug.
+	var deviceID *uuid.UUID
+	if deviceSlug != "" {
+		var did uuid.UUID
+		err := s.pool.QueryRow(ctx, `
+			SELECT d.id FROM devices d
+			JOIN zones z ON z.id = d.zone_id
+			JOIN sites s ON s.id = z.site_id
+			JOIN tenants t ON t.id = s.tenant_id
+			WHERE t.slug = $1 AND d.slug = $2`, tenantSlug, deviceSlug).Scan(&did)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return 0, err
+		}
+		if err == nil {
+			deviceID = &did
+		}
+	}
+
+	// Marque les alarmes ouvertes comme résolues.
+	rows, err := s.pool.Query(ctx, `
+		UPDATE alarms
+		SET    state       = 'resolved',
+		       resolved_at = now(),
+		       last_value  = $3,
+		       updated_at  = now()
+		WHERE  rule_id = $1
+		  AND  ((device_id IS NULL AND $2::uuid IS NULL) OR device_id = $2)
+		  AND  state IN ('triggered', 'acknowledged')
+		RETURNING id`, ruleID, deviceID, currentValue)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	resolvedIDs := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		resolvedIDs = append(resolvedIDs, id)
+	}
+
+	// Ajoute un event "resolved" pour chaque alarme résolue (trace dans
+	// l'historique pour la page Alarmes).
+	for _, id := range resolvedIDs {
+		_, _ = s.pool.Exec(ctx, `
+			INSERT INTO alarm_events (alarm_id, state, severity, description, trigger_count, value)
+			SELECT $1, 'resolved', severity,
+			       'Retour à la normale (résolution automatique)',
+			       trigger_count, $2
+			FROM   alarms WHERE id = $1`, id, currentValue)
+	}
+	return len(resolvedIDs), nil
+}
+
 // LookupContext — résout en une seule requête (tenant_id, site_id, device_id,
 // zone_id, unit) à partir du tenant_slug + device_slug + measurement.
 type LookupResult struct {

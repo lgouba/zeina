@@ -36,15 +36,22 @@ import (
 	"github.com/zeina/hyperviseur/services/rules-engine/internal/template"
 )
 
+// AlarmResolver — sous-ensemble de l'API alarms.Store que l'engine utilise
+// pour auto-résoudre les alarmes au retour à la normale (mode edge).
+type AlarmResolver interface {
+	AutoResolveByRuleAndDevice(ctx context.Context, ruleID uuid.UUID, tenantSlug, deviceSlug string, currentValue float64) (int, error)
+}
+
 // Engine assemble store + state + actions + cron + MQTT consumer.
 type Engine struct {
-	pool  *pgxpool.Pool
-	store *store.Store
-	state *state.State
-	mqtt  *sharedmqtt.Client
-	exec  *actions.Executor
-	cron  *cron.Cron
-	log   zerolog.Logger
+	pool   *pgxpool.Pool
+	store  *store.Store
+	state  *state.State
+	mqtt   *sharedmqtt.Client
+	exec   *actions.Executor
+	cron   *cron.Cron
+	log    zerolog.Logger
+	alarms AlarmResolver // optionnel, set via SetAlarmResolver
 
 	// Cache device_slug → (site_slug, zone_slug) par tenant — utilisé par
 	// l'executor pour construire les topics MQTT cmd. Refresh périodique.
@@ -97,9 +104,13 @@ func (e *Engine) SetActionProviders(email *actions.EmailProvider, sms *actions.S
 	e.exec.SetProviders(email, sms)
 }
 
-// SetAlarmStore — branche le store d'alarmes pour l'action `alarm`.
+// SetAlarmStore — branche le store d'alarmes pour l'action `alarm` ET pour
+// l'auto-résolution edge-triggered.
 func (e *Engine) SetAlarmStore(s actions.AlarmStore) {
 	e.exec.SetAlarmStore(s)
+	if r, ok := s.(AlarmResolver); ok {
+		e.alarms = r
+	}
 }
 
 // ResolveDevice — implémente actions.DeviceLookup.
@@ -260,6 +271,14 @@ func (e *Engine) onMessage(topic string, payload []byte) {
 }
 
 // evaluateAndMaybeExecute teste le trigger, puis les conditions, puis exécute.
+//
+// Mode edge (défaut) : la règle déclenche une seule fois quand la condition
+// devient vraie, puis attend le retour à la normale (condition fausse) avant
+// de pouvoir re-déclencher. Au retour normal, on auto-résout les alarmes
+// ouvertes. Évite le spam (1 mail par incident, pas par mesure).
+//
+// Mode level (legacy) : la règle déclenche tant que la condition est vraie
+// dans la limite de cooldown_seconds.
 func (e *Engine) evaluateAndMaybeExecute(ctx context.Context, r store.Loaded, currentValue float64) {
 	t := r.Definition.Trigger
 
@@ -269,16 +288,58 @@ func (e *Engine) evaluateAndMaybeExecute(ctx context.Context, r store.Loaded, cu
 		e.log.Warn().Err(err).Str("rule_id", r.ID.String()).Msg("trigger check failed")
 		return
 	}
+
+	// État précédent (uniquement pertinent pour le mode edge).
+	wasTriggered, _ := e.state.IsTriggered(ctx, r.ID, t.DeviceSlug)
+
 	if matched {
 		metrics.TriggerEvaluations.WithLabelValues(t.Type, "matched").Inc()
-	} else {
-		metrics.TriggerEvaluations.WithLabelValues(t.Type, "nomatch").Inc()
+		// Mode edge : si déjà triggered, ne pas re-fire (1 seule notif par incident).
+		if r.Definition.IsEdgeTriggered() && wasTriggered {
+			return
+		}
+		tplCtx := e.buildTplContext(r, &currentValue)
+		e.fire(ctx, r, tplCtx)
+		// Marque triggered après un fire réussi (cooldown / conditions échouées
+		// sont gérés dans fire et n'aboutissent pas à un déclenchement réel).
+		_ = e.state.SetTriggered(ctx, r.ID, t.DeviceSlug)
 		return
 	}
 
-	// Construit le contexte de templating à partir du device qui a déclenché.
-	tplCtx := e.buildTplContext(r, &currentValue)
-	e.fire(ctx, r, tplCtx)
+	metrics.TriggerEvaluations.WithLabelValues(t.Type, "nomatch").Inc()
+
+	// Mode edge : retour à la normale → auto-résoudre les alarmes ouvertes
+	// liées à ce (rule, device) et clear l'état triggered.
+	if r.Definition.IsEdgeTriggered() && wasTriggered {
+		e.handleResolution(ctx, r, currentValue)
+	}
+}
+
+// handleResolution traite le retour à la normale (condition redevient fausse
+// après avoir été vraie). Auto-résout les alarmes ouvertes, log l'événement
+// et clear l'état triggered. Aucune notification n'est envoyée par défaut
+// pour ne pas spammer (le user peut surveiller la page Alarmes).
+func (e *Engine) handleResolution(ctx context.Context, r store.Loaded, currentValue float64) {
+	t := r.Definition.Trigger
+	deviceSlug := t.DeviceSlug
+
+	// Auto-résoudre les alarmes ouvertes pour ce rule×device.
+	if e.alarms != nil {
+		n, err := e.alarms.AutoResolveByRuleAndDevice(ctx, r.ID, r.TenantSlug, deviceSlug, currentValue)
+		if err != nil {
+			e.log.Warn().Err(err).Str("rule_id", r.ID.String()).Msg("auto-resolve alarms failed")
+		} else if n > 0 {
+			e.log.Info().
+				Str("rule_id", r.ID.String()).
+				Str("device", deviceSlug).
+				Int("alarms_resolved", n).
+				Float64("current_value", currentValue).
+				Msg("auto-resolved alarms on return to normal")
+		}
+	}
+
+	// Clear l'état triggered → la prochaine traversée de seuil pourra fire.
+	_ = e.state.ClearTriggered(ctx, r.ID, deviceSlug)
 }
 
 // buildTplContext rassemble les infos exposables aux templates de messages.

@@ -93,6 +93,38 @@ func sustainedKey(id uuid.UUID, deviceSlug string) string {
 	return "rule:" + id.String() + ":" + deviceSlug + ":sustained_since"
 }
 
+// --- Triggered state (pour le mode "edge") ----------------------------
+//
+// Une règle en mode edge-triggered ne déclenche QU'À la transition
+// normale → anormale (et auto-résout au retour normal). On garde l'état
+// "actuellement déclenché" par (rule, device) en Redis avec un TTL long
+// (7 jours) — la clé est explicitement supprimée au retour normal.
+
+const triggeredTTL = 7 * 24 * time.Hour
+
+func (s *State) IsTriggered(ctx context.Context, ruleID uuid.UUID, deviceSlug string) (bool, error) {
+	n, err := s.r.Exists(ctx, triggeredKey(ruleID, deviceSlug)).Result()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (s *State) SetTriggered(ctx context.Context, ruleID uuid.UUID, deviceSlug string) error {
+	return s.r.Set(ctx, triggeredKey(ruleID, deviceSlug), "1", triggeredTTL).Err()
+}
+
+func (s *State) ClearTriggered(ctx context.Context, ruleID uuid.UUID, deviceSlug string) error {
+	return s.r.Del(ctx, triggeredKey(ruleID, deviceSlug)).Err()
+}
+
+func triggeredKey(id uuid.UUID, deviceSlug string) string {
+	if deviceSlug == "" {
+		return "rule:" + id.String() + ":triggered"
+	}
+	return "rule:" + id.String() + ":" + deviceSlug + ":triggered"
+}
+
 // --- Last value (pour value_change) -------------------------------------
 
 func (s *State) LastValue(ctx context.Context, deviceSlug, measurement string) (float64, bool, error) {

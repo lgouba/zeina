@@ -317,6 +317,7 @@ function RuleModal({ siteId, devices, zones, editing, initialDefinition, initial
     { type: "notify", level: "warning", message: "Seuil dépassé" },
   ]);
   const [cooldown, setCooldown] = useState<number>(baseDef?.cooldown_seconds ?? 300);
+  const [retriggerMode, setRetriggerMode] = useState<"edge" | "level">(baseDef?.retrigger_mode || "edge");
   const [timeWindow, setTimeWindow] = useState<RuleTimeWindow | undefined>(baseDef?.time_window);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -335,6 +336,7 @@ function RuleModal({ siteId, devices, zones, editing, initialDefinition, initial
       conditions,
       actions,
       cooldown_seconds: cooldown,
+      retrigger_mode: retriggerMode,
       time_window: timeWindow,
     };
     const body = { name: name.trim(), description: description.trim() || undefined, enabled, definition: def };
@@ -811,13 +813,34 @@ function RuleModal({ siteId, devices, zones, editing, initialDefinition, initial
             </div>
           </Section>
 
-          {/* Cooldown */}
-          <Section title="Anti-rebond" icon={<Clock className="h-4 w-4" />}>
-            <Field label="Délai minimum entre 2 déclenchements (secondes)"
-              hint="Empêche la règle de se redéclencher trop vite. 0 = pas de délai"
-              tooltip="Une fois la règle déclenchée, elle ne pourra pas se redéclencher pendant ce délai. Pratique pour éviter les rafales de notifications quand la valeur oscille autour d'un seuil. 300 s = 5 min.">
-              <input type="number" min={0} value={cooldown} onChange={(e) => setCooldown(+e.target.value)} className={inputCls} />
+          {/* Mode de re-déclenchement + cooldown */}
+          <Section title="Anti-spam" icon={<Clock className="h-4 w-4" />}>
+            <Field label="Mode de déclenchement" tooltip={
+              <>
+                <p><strong>Une seule fois par incident</strong> — la règle déclenche quand la mesure dépasse le seuil, puis attend que la mesure redescende sous le seuil avant de pouvoir re-déclencher. Au retour à la normale, l'alarme est automatiquement résolue. <strong>Recommandé</strong> pour éviter le spam de notifications.</p>
+                <p className="mt-1"><strong>Déclencher en boucle</strong> — la règle envoie une notification toutes les X secondes (défini ci-dessous) tant que la condition reste vraie. À utiliser pour des rappels insistants type incidents critiques.</p>
+              </>
+            }>
+              <div className="grid grid-cols-2 gap-2">
+                <label className={`cursor-pointer rounded-lg border-2 p-3 transition ${retriggerMode === "edge" ? "border-brand-500 bg-brand-500/5" : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"}`}>
+                  <input type="radio" checked={retriggerMode === "edge"} onChange={() => setRetriggerMode("edge")} className="sr-only" />
+                  <div className="text-sm font-medium">🎯 Une seule fois par incident</div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">1 notification au franchissement, auto-résolue au retour normal. <strong>Recommandé.</strong></div>
+                </label>
+                <label className={`cursor-pointer rounded-lg border-2 p-3 transition ${retriggerMode === "level" ? "border-amber-500 bg-amber-500/5" : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"}`}>
+                  <input type="radio" checked={retriggerMode === "level"} onChange={() => setRetriggerMode("level")} className="sr-only" />
+                  <div className="text-sm font-medium">🔁 Déclencher en boucle</div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Re-notif périodique tant que la condition est vraie (utilise le délai ci-dessous).</div>
+                </label>
+              </div>
             </Field>
+            {retriggerMode === "level" && (
+              <Field label="Délai entre 2 déclenchements (secondes)"
+                hint="0 = pas de délai (à éviter, risque de spam)"
+                tooltip="Pour le mode boucle : intervalle minimum entre 2 notifications consécutives. 300 s = 5 min.">
+                <input type="number" min={0} value={cooldown} onChange={(e) => setCooldown(+e.target.value)} className={inputCls} />
+              </Field>
+            )}
           </Section>
 
           {/* Time window — créneau actif */}

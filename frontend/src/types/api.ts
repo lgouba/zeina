@@ -344,6 +344,15 @@ export interface RuleDefinition {
   conditions?: RuleCondition[];
   actions: RuleAction[];
   cooldown_seconds?: number;
+  /**
+   * "edge" (défaut, recommandé) : la règle déclenche une seule fois quand la
+   * condition devient vraie, puis attend le retour à la normale pour pouvoir
+   * re-déclencher. Auto-résolution des alarmes au retour normal.
+   *
+   * "level" (legacy) : déclenche tant que la condition est vraie, dans la
+   * limite de cooldown_seconds.
+   */
+  retrigger_mode?: "edge" | "level";
   time_window?: RuleTimeWindow;
 }
 

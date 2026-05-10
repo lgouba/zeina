@@ -42,9 +42,23 @@ type Rule struct {
 	Conditions      []Condition `json:"conditions,omitempty"`
 	Actions         []Action    `json:"actions"`
 	CooldownSeconds int         `json:"cooldown_seconds,omitempty"`
+	// RetriggerMode contrôle ce qui se passe quand la condition reste vraie
+	// pendant plusieurs mesures consécutives :
+	//   - "edge"  (défaut, recommandé) : la règle déclenche UNE seule fois,
+	//     puis attend que la mesure repasse à un état normal pour pouvoir
+	//     re-déclencher. Au retour normal, les alarmes ouvertes sont
+	//     auto-résolues. Évite le spam (1 mail par incident, pas par mesure).
+	//   - "level" (legacy) : déclenche tant que la condition est vraie, dans
+	//     la limite du cooldown_seconds. Utile pour les rappels périodiques.
+	RetriggerMode string `json:"retrigger_mode,omitempty"`
 	// TimeWindow — créneau pendant lequel la règle est active. Hors créneau,
 	// le trigger n'est même pas évalué. Optionnel : nil = toujours active.
 	TimeWindow *TimeWindow `json:"time_window,omitempty"`
+}
+
+// IsEdgeTriggered renvoie true si la règle est en mode edge (défaut).
+func (r Rule) IsEdgeTriggered() bool {
+	return r.RetriggerMode == "" || r.RetriggerMode == "edge"
 }
 
 // TimeWindow définit un créneau temporel récurrent (jours + heures + fuseau)
