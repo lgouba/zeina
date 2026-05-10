@@ -6,15 +6,21 @@
 // rules.definition. Le format graph est conservé en parallèle dans
 // rules.definition_graph pour pouvoir réafficher l'éditeur tel quel.
 //
-// Topologie supportée en V1 :
+// Topologies supportées :
 //
-//	[Trigger] → [Condition?] → [Action 1, 2, 3, …]
+//   A. Équipement → Condition → Actions
+//      Equipment (source de données) fournit le device + ses mesures dispos.
+//      Condition compare une de ces mesures à un seuil (op + value).
+//      Compile vers trigger.type = "threshold".
 //
-//	avec Condition optionnelle, et chaque Action peut être branchée sur la
-//	sortie "true" ou "false" du Condition (champ branch dans le legacy).
+//   B. Trigger périodique (cron) → Condition? → Actions
+//      Compile vers trigger.type = "cron".
 //
-// Types de nodes : trigger / condition / action_email / action_sms /
-// action_alarm / action_webhook / action_actuator / action_notify
+//   C. Trigger threshold legacy → Condition? → Actions (pour les anciennes
+//      règles éditées dans l'éditeur graph).
+//
+// Types de nodes :
+//   equipment, trigger (legacy/cron), condition, action_*
 
 package handlers
 
@@ -44,48 +50,53 @@ type graphEdge struct {
 }
 
 // compileGraphToDefinition convertit le graph visuel en RuleDefinition
-// JSONB. Erreur si le graph est mal formé (trigger manquant, action sans
-// trigger, etc.).
+// JSONB. Erreur si le graph est mal formé.
 func compileGraphToDefinition(raw json.RawMessage) (json.RawMessage, error) {
 	var g graphDoc
 	if err := json.Unmarshal(raw, &g); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 
-	// Index par ID pour résolution rapide.
 	byID := map[string]graphNode{}
 	for _, n := range g.Nodes {
 		byID[n.ID] = n
 	}
 
-	// Localise le trigger (1 seul attendu en V1).
-	var trigger *graphNode
-	for i, n := range g.Nodes {
-		if n.Type == "trigger" {
-			if trigger != nil {
-				return nil, errors.New("plusieurs blocs trigger trouvés (1 seul attendu)")
-			}
-			trigger = &g.Nodes[i]
-		}
-	}
-	if trigger == nil {
-		return nil, errors.New("aucun bloc trigger — la règle doit avoir un point de départ")
-	}
-
-	// Construit la map des edges sortantes par source.
+	// Map edges sortantes par source.
 	outEdges := map[string][]graphEdge{}
 	for _, e := range g.Edges {
 		outEdges[e.Source] = append(outEdges[e.Source], e)
 	}
 
-	// Conditions : un seul bloc condition supporté en V1.
+	// Localise le point d'entrée : Equipment (V2) ou Trigger (V1/legacy).
+	var sourceNode *graphNode
+	for i, n := range g.Nodes {
+		if n.Type == "equipment" || n.Type == "trigger" {
+			if sourceNode != nil {
+				return nil, errors.New("plusieurs blocs source (Équipement/Trigger) trouvés — 1 seul attendu")
+			}
+			sourceNode = &g.Nodes[i]
+		}
+	}
+	if sourceNode == nil {
+		return nil, errors.New("aucun bloc Équipement ou Trigger — la règle doit avoir un point de départ")
+	}
+
+	// Cherche un Condition relié au sourceNode.
 	var conditionNode *graphNode
-	for _, e := range outEdges[trigger.ID] {
+	for _, e := range outEdges[sourceNode.ID] {
 		if t, ok := byID[e.Target]; ok && t.Type == "condition" {
 			n := t
 			conditionNode = &n
 			break
 		}
+	}
+
+	// Construit le trigger legacy à partir d'Equipment + Condition (cas A) ou
+	// d'un Trigger natif (cas B/C).
+	trigger := buildTriggerFromGraph(sourceNode, conditionNode)
+	if trigger == nil {
+		return nil, errors.New("le bloc Équipement doit être relié à un bloc Condition pour définir un seuil")
 	}
 
 	// Construit la liste des actions :
@@ -108,7 +119,7 @@ func compileGraphToDefinition(raw json.RawMessage) (json.RawMessage, error) {
 			}
 		}
 	} else {
-		for _, e := range outEdges[trigger.ID] {
+		for _, e := range outEdges[sourceNode.ID] {
 			if t, ok := byID[e.Target]; ok && isActionType(t.Type) {
 				actionsList = append(actionsList, actionWithBranch{node: t, branch: "true"})
 			}
@@ -116,27 +127,33 @@ func compileGraphToDefinition(raw json.RawMessage) (json.RawMessage, error) {
 	}
 
 	if len(actionsList) == 0 {
-		return nil, errors.New("aucune action — connectez au moins une action en sortie du trigger ou du condition")
+		return nil, errors.New("aucune action — connectez au moins une action en sortie")
 	}
 
 	// Sérialise en RuleDefinition compatible avec rules-engine.
 	def := map[string]interface{}{}
-	def["trigger"] = trigger.Data
+	def["trigger"] = trigger
+	// Cooldown / retrigger_mode propagés depuis le source node ou le condition node.
+	if cd, ok := sourceNode.Data["cooldown_seconds"]; ok {
+		def["cooldown_seconds"] = cd
+	}
+	if rm, ok := sourceNode.Data["retrigger_mode"]; ok {
+		def["retrigger_mode"] = rm
+	}
 	if conditionNode != nil {
-		// Le bloc condition côté UI peut contenir conditions[] + conditions_op.
-		if conds, ok := conditionNode.Data["conditions"]; ok {
+		if cd, ok := conditionNode.Data["cooldown_seconds"]; ok {
+			def["cooldown_seconds"] = cd
+		}
+		if rm, ok := conditionNode.Data["retrigger_mode"]; ok {
+			def["retrigger_mode"] = rm
+		}
+		// Conditions secondaires (autres que celle qui sert de threshold).
+		if conds, ok := conditionNode.Data["extra_conditions"]; ok {
 			def["conditions"] = conds
 		}
 		if op, ok := conditionNode.Data["conditions_op"]; ok {
 			def["conditions_op"] = op
 		}
-	}
-	// Cooldown / retrigger_mode propagés depuis le trigger node si présents.
-	if cd, ok := trigger.Data["cooldown_seconds"]; ok {
-		def["cooldown_seconds"] = cd
-	}
-	if rm, ok := trigger.Data["retrigger_mode"]; ok {
-		def["retrigger_mode"] = rm
 	}
 
 	// Actions : on injecte le `branch` dans chaque action data.
@@ -153,6 +170,50 @@ func compileGraphToDefinition(raw json.RawMessage) (json.RawMessage, error) {
 	def["actions"] = actions
 
 	return json.Marshal(def)
+}
+
+// buildTriggerFromGraph fusionne (Equipment + Condition) ou (Trigger natif)
+// en un objet trigger compatible avec rules-engine (threshold / cron / etc.).
+//
+//   - Equipment.device_slug → trigger.device_slug
+//   - Condition.measurement → trigger.measurement
+//   - Condition.op + value   → trigger.op + value
+//   - Trigger natif : on retourne tel quel (data du bloc)
+func buildTriggerFromGraph(source, cond *graphNode) map[string]interface{} {
+	if source == nil {
+		return nil
+	}
+	if source.Type == "trigger" {
+		// Cas legacy : le bloc trigger contient déjà tout.
+		out := cloneMap(source.Data)
+		if _, ok := out["type"]; !ok {
+			out["type"] = "threshold"
+		}
+		return out
+	}
+	// Cas equipment : nécessite un Condition relié pour fournir mesure + seuil.
+	if cond == nil {
+		return nil
+	}
+	device, _ := source.Data["device_slug"].(string)
+	measurement, _ := cond.Data["measurement"].(string)
+	op, _ := cond.Data["op"].(string)
+	if device == "" || measurement == "" || op == "" {
+		return nil
+	}
+	t := map[string]interface{}{
+		"type":         "threshold",
+		"device_slug":  device,
+		"measurement":  measurement,
+		"op":           op,
+	}
+	if v, ok := cond.Data["value"]; ok {
+		t["value"] = v
+	}
+	if s, ok := cond.Data["sustained_seconds"]; ok {
+		t["sustained_seconds"] = s
+	}
+	return t
 }
 
 // isActionType — true si le node type représente une action exécutable.

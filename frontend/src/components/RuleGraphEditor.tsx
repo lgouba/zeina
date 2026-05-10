@@ -15,7 +15,7 @@
 // Sérialisation : compileGraph côté frontend produit { nodes, edges } envoyé
 // au backend qui le compile en RuleDefinition pour le moteur.
 
-import { useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap,
   Handle, Position, useNodesState, useEdgesState,
@@ -24,19 +24,21 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Activity, Sparkles, Bell, Mail, MessageSquare, Webhook, ToggleRight, AlertCircle,
-  Plus, Trash2, X, Check, Save, Building2,
+  Plus, Trash2, X, Check, Save, Cpu,
 } from "lucide-react";
 import clsx from "clsx";
 import { useConfirm } from "./ConfirmDialog";
-import type { DeviceListItem, Zone, RuleDefinition } from "../types/api";
+import { api } from "../lib/api";
+import type { DeviceListItem, Zone, RuleDefinition, MeasurementMeta } from "../types/api";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type GraphNodeType =
-  | "trigger"
-  | "condition"
+  | "equipment"   // source de données : un device + ses mesures dispos
+  | "trigger"     // déclencheur temporel (cron) ou legacy threshold
+  | "condition"   // logique métier : compare une mesure du device en amont
   | "action_notify"
   | "action_email"
   | "action_sms"
@@ -75,10 +77,11 @@ const NODE_META: Record<GraphNodeType, {
   label: string;
   short: string;
   icon: typeof Activity;
-  color: string; // tailwind base
+  color: string;
   isAction: boolean;
 }> = {
-  trigger:         { label: "Déclencheur",     short: "Trigger",   icon: Activity,       color: "violet",   isAction: false },
+  equipment:       { label: "Équipement déclencheur", short: "Équipement", icon: Cpu,        color: "violet", isAction: false },
+  trigger:         { label: "Déclenchement périodique", short: "Cron",     icon: Activity,    color: "violet", isAction: false },
   condition:       { label: "Condition",       short: "Condition", icon: Sparkles,       color: "amber",    isAction: false },
   action_notify:   { label: "Notification",    short: "Notif",     icon: Bell,           color: "sky",      isAction: true  },
   action_email:    { label: "Envoyer un email", short: "Email",     icon: Mail,           color: "blue",     isAction: true  },
@@ -138,39 +141,41 @@ function RuleGraphEditorInner({
   const addBlock = useCallback((type: GraphNodeType) => {
     setError(null);
     const id = newID(type);
-    const triggerNode = nodes.find((n) => (n.data as any)._kind === "trigger");
+    const sourceNode = nodes.find((n) => {
+      const k = (n.data as any)._kind;
+      return k === "equipment" || k === "trigger";
+    });
     const conditionNode = nodes.find((n) => (n.data as any)._kind === "condition");
     let position = { x: 200, y: 200 };
     let parentId: string | null = null;
     let sourceHandle: string | undefined;
 
-    if (type === "trigger") {
-      if (triggerNode) {
-        setError("Une règle ne peut avoir qu'un seul bloc Déclencheur.");
+    if (type === "equipment" || type === "trigger") {
+      if (sourceNode) {
+        setError("Une règle ne peut avoir qu'un seul bloc Équipement ou Déclenchement périodique.");
         return;
       }
       position = { x: 80, y: 200 };
     } else if (type === "condition") {
-      if (!triggerNode) {
-        setError("Ajoute d'abord un bloc Déclencheur avant la Condition.");
+      if (!sourceNode) {
+        setError("Ajoute d'abord un bloc Équipement (ou Déclenchement périodique) avant la Condition.");
         return;
       }
       if (conditionNode) {
         setError("Une règle ne peut avoir qu'un seul bloc Condition.");
         return;
       }
-      parentId = triggerNode.id;
-      position = { x: triggerNode.position.x + 280, y: triggerNode.position.y };
+      parentId = sourceNode.id;
+      position = { x: sourceNode.position.x + 280, y: sourceNode.position.y };
     } else {
-      // Actions : se branchent sur la condition (true) si elle existe, sinon sur le trigger.
-      const parent = conditionNode || triggerNode;
+      // Actions : se branchent sur la condition (true) si elle existe, sinon sur le source.
+      const parent = conditionNode || sourceNode;
       if (!parent) {
-        setError("Ajoute d'abord un bloc Déclencheur avant les actions.");
+        setError("Ajoute d'abord un bloc Équipement avant les actions.");
         return;
       }
       parentId = parent.id;
       sourceHandle = conditionNode ? "true" : undefined;
-      // Empile les actions sur l'axe Y
       const actionCount = nodes.filter((n) => NODE_META[(n.data as any)._kind as GraphNodeType]?.isAction).length;
       position = {
         x: parent.position.x + 280,
@@ -332,7 +337,7 @@ function RuleGraphEditorInner({
             Blocs
           </div>
           <div className="space-y-1.5">
-            {(["trigger", "condition"] as GraphNodeType[]).map((t) => (
+            {(["equipment", "trigger", "condition"] as GraphNodeType[]).map((t) => (
               <PaletteButton key={t} type={t} onAdd={addBlock} />
             ))}
             <div className="text-[10px] uppercase tracking-wider text-slate-400 mt-3 mb-1.5">Actions</div>
@@ -383,6 +388,8 @@ function RuleGraphEditorInner({
         {selectedNode ? (
           <ConfigPanel
             node={selectedNode}
+            nodes={nodes}
+            edges={edges}
             devices={devices}
             zones={zones}
             onChange={(patch) => updateNodeData(selectedNode.id, patch)}
@@ -495,9 +502,11 @@ function ZeinaBlock({ data, selected }: NodeProps<Node<GraphNodeData & { _kind?:
 // ---------------------------------------------------------------------------
 
 function ConfigPanel({
-  node, devices, zones, onChange, onDelete, onClose,
+  node, nodes, edges, devices, zones, onChange, onDelete, onClose,
 }: {
   node: Node<GraphNodeData>;
+  nodes: Node<GraphNodeData>[];
+  edges: Edge[];
   devices: DeviceListItem[];
   zones: Zone[];
   onChange: (patch: Partial<GraphNodeData>) => void;
@@ -508,6 +517,17 @@ function ConfigPanel({
   const m = NODE_META[kind];
   const Icon = m.icon;
   const data = node.data as any;
+
+  // Pour Condition : trouver le node Equipment connecté en amont (via edge entrante)
+  const upstreamEquipment = useMemo(() => {
+    if (kind !== "condition") return null;
+    const incoming = edges.find((e) => e.target === node.id);
+    if (!incoming) return null;
+    const src = nodes.find((n) => n.id === incoming.source);
+    if (!src) return null;
+    if ((src.data as any)._kind !== "equipment") return null;
+    return src;
+  }, [kind, node.id, nodes, edges]);
 
   return (
     <aside className="w-80 shrink-0 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col">
@@ -524,8 +544,9 @@ function ConfigPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3 text-sm">
+        {kind === "equipment" && <EquipmentForm data={data} devices={devices} onChange={onChange} />}
         {kind === "trigger" && <TriggerForm data={data} devices={devices} zones={zones} onChange={onChange} />}
-        {kind === "condition" && <ConditionForm data={data} devices={devices} onChange={onChange} />}
+        {kind === "condition" && <ConditionForm data={data} upstreamEquipment={upstreamEquipment} onChange={onChange} />}
         {kind === "action_notify" && <NotifyForm data={data} onChange={onChange} />}
         {kind === "action_email" && <EmailForm data={data} onChange={onChange} />}
         {kind === "action_sms" && <SmsForm data={data} onChange={onChange} />}
@@ -558,51 +579,63 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function TriggerForm({ data, devices, zones, onChange }: any) {
-  const triggerType = data.type || "threshold";
+// Equipment : juste le choix du device. Les mesures dispos sont auto-fetched
+// et stockées en data.available_measurements pour que la Condition puisse
+// les lire en dropdown.
+function EquipmentForm({ data, devices, onChange }: any) {
+  const [loading, setLoading] = useState(false);
+  const deviceSlug = data.device_slug || "";
+  const device = devices.find((d: DeviceListItem) => d.slug === deviceSlug);
+
+  // Recharge les mesures dispos quand le device change.
+  useEffect(() => {
+    if (!device) {
+      onChange({ available_measurements: [] });
+      return;
+    }
+    setLoading(true);
+    api.get<MeasurementMeta[]>(`/v1/devices/${device.id}/measurements-metadata`)
+      .then((metas) => {
+        onChange({
+          available_measurements: metas.map((m) => ({
+            measurement: m.measurement,
+            unit: m.unit,
+            min: m.min_value,
+            max: m.max_value,
+            description: m.description,
+          })),
+        });
+      })
+      .catch(() => onChange({ available_measurements: [] }))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device?.id]);
+
   return (
     <>
-      <Field label="Type">
-        <select value={triggerType} onChange={(e) => onChange({ type: e.target.value })} className={inputCls}>
-          <option value="threshold">📈 Seuil sur une mesure</option>
-          <option value="cron">⏰ Heure programmée</option>
+      <Field label="Équipement *">
+        <select value={deviceSlug} onChange={(e) => onChange({ device_slug: e.target.value })} className={inputCls}>
+          <option value="">— Choisir —</option>
+          {devices.map((d: DeviceListItem) => (
+            <option key={d.id} value={d.slug}>{d.name || d.slug}{d.zone_name && ` (${d.zone_name})`}</option>
+          ))}
         </select>
       </Field>
-      {triggerType === "threshold" && (
-        <>
-          <Field label="Équipement">
-            <select value={data.device_slug || ""} onChange={(e) => onChange({ device_slug: e.target.value })} className={inputCls}>
-              <option value="">— Choisir —</option>
-              {devices.map((d: DeviceListItem) => (
-                <option key={d.id} value={d.slug}>{d.name || d.slug}{d.zone_name && ` (${d.zone_name})`}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Mesure">
-            <input value={data.measurement || ""} onChange={(e) => onChange({ measurement: e.target.value })}
-              placeholder="ex: temperature" className={inputCls} />
-          </Field>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Opérateur">
-              <select value={data.op || ">"} onChange={(e) => onChange({ op: e.target.value })} className={inputCls}>
-                {[">", ">=", "<", "<=", "==", "!="].map((o) => <option key={o}>{o}</option>)}
-              </select>
-            </Field>
-            <Field label="Valeur">
-              <input type="number" value={data.value ?? 0} onChange={(e) => onChange({ value: +e.target.value })} className={inputCls} />
-            </Field>
+      {loading && <p className="text-xs text-slate-400 italic">Chargement des mesures…</p>}
+      {Array.isArray(data.available_measurements) && data.available_measurements.length > 0 && (
+        <div>
+          <span className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-medium block mb-1">
+            Mesures disponibles
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {data.available_measurements.map((m: any) => (
+              <span key={m.measurement} className="text-[11px] px-2 py-0.5 rounded bg-violet-500/10 text-violet-700 dark:text-violet-300">
+                {m.measurement}{m.unit ? ` (${unitSymbol(m.unit)})` : ""}
+              </span>
+            ))}
           </div>
-          <Field label="Soutenu (s)" hint="Durée minimum au-dessus du seuil avant déclenchement. 0 = immédiat.">
-            <input type="number" min={0} value={data.sustained_seconds ?? 0}
-              onChange={(e) => onChange({ sustained_seconds: +e.target.value })} className={inputCls} />
-          </Field>
-        </>
-      )}
-      {triggerType === "cron" && (
-        <Field label="Expression cron" hint="Format : 'm h jm M js' — ex: '0 18 * * 1-5' = à 18h en semaine">
-          <input value={data.schedule || ""} onChange={(e) => onChange({ schedule: e.target.value })}
-            placeholder="0 18 * * 1-5" className={`${inputCls} font-mono`} />
-        </Field>
+          <p className="text-[10px] text-slate-400 mt-1.5">Sélectionnez l'attribut à surveiller dans le bloc Condition.</p>
+        </div>
       )}
       <Field label="Mode de déclenchement"
         hint="Edge = 1 fois par incident (auto-résolu au retour normal). Level = répète tant que vrai.">
@@ -617,52 +650,98 @@ function TriggerForm({ data, devices, zones, onChange }: any) {
             onChange={(e) => onChange({ cooldown_seconds: +e.target.value })} className={inputCls} />
         </Field>
       )}
-      {/* zones unused here mais maintient la signature */}
-      {void zones}
     </>
   );
 }
 
-function ConditionForm({ data, devices, onChange }: any) {
-  const conditions: any[] = data.conditions || [];
-  const op = data.conditions_op || "AND";
-  function setConds(next: any[]) { onChange({ conditions: next }); }
+// Trigger périodique (cron) — bloc séparé qui ne nécessite pas d'équipement.
+function TriggerForm({ data, onChange }: any) {
   return (
     <>
-      <Field label="Opérateur entre conditions">
-        <select value={op} onChange={(e) => onChange({ conditions_op: e.target.value })} className={inputCls}>
-          <option value="AND">Toutes vraies (AND)</option>
-          <option value="OR">Au moins une vraie (OR)</option>
-        </select>
+      <Field label="Expression cron" hint="Format : 'm h jm M js' — ex: '0 18 * * 1-5' = à 18h en semaine">
+        <input value={data.schedule || ""} onChange={(e) => onChange({ schedule: e.target.value, type: "cron" })}
+          placeholder="0 18 * * 1-5" className={`${inputCls} font-mono`} />
       </Field>
-      {conditions.map((c, i) => (
-        <div key={i} className="rounded-md bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 p-2 space-y-2">
-          <div className="flex items-center gap-2">
-            <select value={c.device_slug || ""} onChange={(e) => setConds(conditions.map((x, j) => j === i ? { ...x, device_slug: e.target.value } : x))} className="flex-1 text-xs rounded bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2 py-1">
-              <option value="">Équipement…</option>
-              {devices.map((d: DeviceListItem) => <option key={d.id} value={d.slug}>{d.name || d.slug}</option>)}
-            </select>
-            <button onClick={() => setConds(conditions.filter((_, j) => j !== i))}
-              className="p-1 text-red-500 hover:bg-red-500/10 rounded"><Trash2 className="h-3 w-3" /></button>
-          </div>
-          <div className="flex gap-1.5">
-            <input value={c.measurement || ""} onChange={(e) => setConds(conditions.map((x, j) => j === i ? { ...x, measurement: e.target.value } : x))}
-              placeholder="mesure" className="flex-1 text-xs rounded bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2 py-1" />
-            <select value={c.op || "=="} onChange={(e) => setConds(conditions.map((x, j) => j === i ? { ...x, op: e.target.value } : x))}
-              className="text-xs rounded bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-1 py-1">
-              {[">", ">=", "<", "<=", "==", "!="].map((o) => <option key={o}>{o}</option>)}
-            </select>
-            <input type="number" value={c.value ?? 0} onChange={(e) => setConds(conditions.map((x, j) => j === i ? { ...x, value: +e.target.value } : x))}
-              className="w-16 text-xs rounded bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-2 py-1" />
-          </div>
-        </div>
-      ))}
-      <button onClick={() => setConds([...conditions, { device_slug: "", measurement: "", op: ">", value: 0 }])}
-        className="w-full text-xs px-2 py-1.5 rounded border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
-        <Plus className="inline h-3 w-3 mr-1" /> Ajouter une condition
-      </button>
     </>
   );
+}
+
+// Condition : compare la mesure d'un Equipment connecté en amont à un seuil.
+// L'attribut (mesure) est un dropdown alimenté par equipment.available_measurements.
+function ConditionForm({ data, upstreamEquipment, onChange }: any) {
+  const measurements: { measurement: string; unit: string }[] =
+    upstreamEquipment ? (upstreamEquipment.data.available_measurements || []) : [];
+  const selectedMeasurement = data.measurement || "";
+  const unit = measurements.find((m) => m.measurement === selectedMeasurement)?.unit || "";
+
+  return (
+    <>
+      {!upstreamEquipment ? (
+        <div className="text-xs text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">
+          Connecte ce bloc à un <strong>Équipement</strong> en amont pour configurer les attributs disponibles.
+        </div>
+      ) : (
+        <>
+          <Field label="Source">
+            <div className="text-xs px-2.5 py-1.5 rounded bg-violet-500/10 text-violet-700 dark:text-violet-300 border border-violet-500/30">
+              {(upstreamEquipment.data.device_slug as string) || "Équipement non configuré"}
+            </div>
+          </Field>
+          <Field label="Attribut *" hint="Auto-rempli depuis les mesures disponibles de l'équipement.">
+            {measurements.length > 0 ? (
+              <select value={selectedMeasurement} onChange={(e) => onChange({ measurement: e.target.value })} className={inputCls}>
+                <option value="">— Choisir —</option>
+                {measurements.map((m) => (
+                  <option key={m.measurement} value={m.measurement}>
+                    {m.measurement}{m.unit ? ` (${unitSymbol(m.unit)})` : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input value={selectedMeasurement} onChange={(e) => onChange({ measurement: e.target.value })}
+                placeholder="ex: temperature" className={inputCls} />
+            )}
+          </Field>
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Opérateur *">
+              <select value={data.op || ">"} onChange={(e) => onChange({ op: e.target.value })} className={inputCls}>
+                {[">", ">=", "<", "<=", "==", "!="].map((o) => <option key={o}>{o}</option>)}
+              </select>
+            </Field>
+            <Field label="Valeur *">
+              <input type="number" value={data.value ?? 0} onChange={(e) => onChange({ value: +e.target.value })} className={inputCls} />
+            </Field>
+            <Field label="Unité">
+              <input value={unitSymbol(unit) || "—"} disabled className={`${inputCls} opacity-60`} />
+            </Field>
+          </div>
+          <Field label="Soutenu (s)" hint="Durée minimum au-dessus du seuil avant déclenchement. 0 = immédiat.">
+            <input type="number" min={0} value={data.sustained_seconds ?? 0}
+              onChange={(e) => onChange({ sustained_seconds: +e.target.value })} className={inputCls} />
+          </Field>
+        </>
+      )}
+    </>
+  );
+}
+
+// unitSymbol — mappe les unités sémantiques DB vers leurs symboles affichables.
+function unitSymbol(u: string): string {
+  switch (u) {
+    case "celsius":   return "°C";
+    case "percent":   return "%";
+    case "ppm":       return "ppm";
+    case "lux":       return "lx";
+    case "watt":      return "W";
+    case "watt-hour": return "Wh";
+    case "VA":        return "VA";
+    case "ampere":    return "A";
+    case "volt":      return "V";
+    case "ug/m3":     return "µg/m³";
+    case "hPa":       return "hPa";
+    case "bool":      return "";
+    default:          return u || "";
+  }
 }
 
 function NotifyForm({ data, onChange }: any) {
@@ -787,15 +866,32 @@ function ActuatorForm({ data, devices, onChange }: any) {
 
 function summarizeNode(kind: GraphNodeType, data: any): React.ReactNode {
   switch (kind) {
+    case "equipment": {
+      if (!data.device_slug) return <span className="text-slate-400">Choisir un équipement…</span>;
+      const meas: any[] = data.available_measurements || [];
+      return (
+        <div>
+          <div className="font-medium text-slate-700 dark:text-slate-200">{data.device_slug}</div>
+          {meas.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {meas.slice(0, 3).map((m) => (
+                <span key={m.measurement} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-700 dark:text-violet-300">{m.measurement}</span>
+              ))}
+              {meas.length > 3 && <span className="text-[10px] text-slate-400">+{meas.length - 3}</span>}
+            </div>
+          )}
+        </div>
+      );
+    }
     case "trigger":
       if (data.type === "cron") return data.schedule ? <span className="font-mono text-[11px]">{data.schedule}</span> : <span className="text-slate-400">Heure programmée</span>;
       return data.device_slug && data.measurement
         ? <>{data.device_slug}.{data.measurement} <strong>{data.op}</strong> {data.value}</>
         : <span className="text-slate-400">Configurer le seuil…</span>;
     case "condition":
-      return (data.conditions || []).length > 0
-        ? `${(data.conditions || []).length} condition(s) (${data.conditions_op || "AND"})`
-        : <span className="text-slate-400">Configurer…</span>;
+      return data.measurement && data.op != null && data.value != null
+        ? <><strong>{data.measurement}</strong> {data.op} <strong>{data.value}</strong></>
+        : <span className="text-slate-400">Configurer le seuil…</span>;
     case "action_notify":
       return data.message || <span className="text-slate-400">Message…</span>;
     case "action_email":
@@ -814,10 +910,12 @@ function summarizeNode(kind: GraphNodeType, data: any): React.ReactNode {
 function defaultDataFor(type: GraphNodeType, devices: DeviceListItem[]): GraphNodeData & { _kind: GraphNodeType } {
   const base: any = { _kind: type };
   switch (type) {
+    case "equipment":
+      return { ...base, device_slug: devices[0]?.slug || "", available_measurements: [], retrigger_mode: "edge", cooldown_seconds: 300 };
     case "trigger":
-      return { ...base, type: "threshold", device_slug: devices[0]?.slug || "", measurement: "temperature", op: ">", value: 25, retrigger_mode: "edge", cooldown_seconds: 300 };
+      return { ...base, type: "cron", schedule: "0 18 * * 1-5" };
     case "condition":
-      return { ...base, conditions_op: "AND", conditions: [] };
+      return { ...base, op: ">", value: 25, sustained_seconds: 0 };
     case "action_notify":
       return { ...base, level: "warning", message: "Seuil dépassé sur {device.name}" };
     case "action_email":
@@ -873,45 +971,74 @@ function serializeGraph(nodes: Node<GraphNodeData>[], edges: Edge[]): GraphDoc {
 }
 
 function defaultGraph(devices: DeviceListItem[]): GraphDoc {
-  const triggerID = newID("trigger");
+  const equipID = newID("equipment");
   return {
     nodes: [
-      { id: triggerID, type: "trigger", data: defaultDataFor("trigger", devices), position: { x: 80, y: 200 } },
+      { id: equipID, type: "equipment", data: defaultDataFor("equipment", devices), position: { x: 80, y: 200 } },
     ],
     edges: [],
   };
 }
 
 // graphFromDefinition — reconstruit un graph approximatif depuis une
-// RuleDefinition legacy. Permet d'ouvrir des règles V0 dans l'éditeur visuel.
+// RuleDefinition legacy. Pour un trigger threshold, on split en
+// Equipment + Condition.
 function graphFromDefinition(def: RuleDefinition): GraphDoc {
-  const triggerID = newID("trigger");
-  const conditionID = (def.conditions && def.conditions.length > 0) ? newID("condition") : null;
-  const nodes: GraphDoc["nodes"] = [
-    { id: triggerID, type: "trigger",
-      data: { ...(def.trigger as any), retrigger_mode: def.retrigger_mode, cooldown_seconds: def.cooldown_seconds },
-      position: { x: 80, y: 200 } },
-  ];
+  const trigger = def.trigger as any;
+  const isThreshold = trigger?.type === "threshold" || (!trigger?.type && trigger?.device_slug);
+
+  const nodes: GraphDoc["nodes"] = [];
   const edges: GraphDoc["edges"] = [];
-  if (conditionID) {
-    nodes.push({ id: conditionID, type: "condition",
-      data: { conditions_op: def.conditions_op, conditions: def.conditions },
-      position: { x: 360, y: 200 } });
-    edges.push({ id: `${triggerID}->${conditionID}`, source: triggerID, target: conditionID });
+  let sourceID: string;
+
+  if (isThreshold) {
+    const equipID = newID("equipment");
+    const condID = newID("condition");
+    sourceID = condID;
+    nodes.push({
+      id: equipID, type: "equipment",
+      data: {
+        device_slug: trigger.device_slug,
+        available_measurements: [],
+        retrigger_mode: def.retrigger_mode,
+        cooldown_seconds: def.cooldown_seconds,
+      },
+      position: { x: 80, y: 200 },
+    });
+    nodes.push({
+      id: condID, type: "condition",
+      data: {
+        measurement: trigger.measurement,
+        op: trigger.op,
+        value: trigger.value,
+        sustained_seconds: trigger.sustained_seconds,
+      },
+      position: { x: 380, y: 200 },
+    });
+    edges.push({ id: `${equipID}->${condID}`, source: equipID, target: condID });
+  } else {
+    // Trigger non-threshold (cron, value_change, etc.) → bloc Trigger
+    const triggerID = newID("trigger");
+    sourceID = triggerID;
+    nodes.push({
+      id: triggerID, type: "trigger",
+      data: { ...trigger, retrigger_mode: def.retrigger_mode, cooldown_seconds: def.cooldown_seconds },
+      position: { x: 80, y: 200 },
+    });
   }
-  const parentID = conditionID || triggerID;
+
   (def.actions || []).forEach((a, i) => {
     const t = `action_${a.type === "set_actuator" ? "actuator" : a.type}` as GraphNodeType;
     if (!NODE_META[t]) return;
     const id = newID(t);
-    nodes.push({ id, type: t, data: { ...a } as any, position: { x: parentID === triggerID ? 360 : 640, y: 60 + i * 130 } });
+    nodes.push({ id, type: t, data: { ...a } as any, position: { x: 680, y: 60 + i * 130 } });
     edges.push({
-      id: `${parentID}->${id}`, source: parentID, target: id,
-      sourceHandle: conditionID ? ((a as any).branch || "true") : undefined,
+      id: `${sourceID}->${id}`, source: sourceID, target: id,
+      sourceHandle: isThreshold ? ((a as any).branch || "true") : undefined,
     });
   });
   return { nodes, edges };
 }
 
-// Empty Building2 import use to keep the icon imported (silence linter)
-void Building2; void Check;
+// Silence unused
+void Check;
