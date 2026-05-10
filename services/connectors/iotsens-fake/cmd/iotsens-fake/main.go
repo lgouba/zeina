@@ -2,17 +2,18 @@
 //
 // Endpoints :
 //
-//   GET  /api/v1/devices                              → liste des devices
-//   GET  /api/v1/devices/{id}/measurements?since=ts   → mesures depuis ts (RFC3339)
-//   POST /api/v1/devices/{id}/commands                → envoi commande (renvoie 202)
+//	GET  /api/v1/devices                              → liste des devices
+//	GET  /api/v1/devices/{id}/measurements?since=ts   → mesures depuis ts (RFC3339)
+//	POST /api/v1/devices/{id}/commands                → envoi commande (renvoie 202)
 //
 // Auth : header X-API-Key (valeur configurable via env IOTSENS_FAKE_API_KEY).
 //
 // Génère en continu des mesures réalistes pour 4 devices d'exemple :
-//   IOTS-TEMP-001 : temperature + humidity
-//   IOTS-CO2-001  : co2
-//   IOTS-METER-01 : énergie (Wh)
-//   IOTS-PIR-001  : présence (0/1)
+//
+//	IOTS-TEMP-001 : temperature + humidity
+//	IOTS-CO2-001  : co2
+//	IOTS-METER-01 : énergie (Wh)
+//	IOTS-PIR-001  : présence (0/1)
 package main
 
 import (
@@ -53,12 +54,12 @@ type apiMeasurement struct {
 // ----------------------------------------------------------------------------
 
 type simDevice struct {
-	id        string
-	name      string
-	gen       func(t time.Time, r *rand.Rand) []apiMeasurement
-	r         *rand.Rand
-	mu        sync.Mutex
-	history   []apiMeasurement // ring buffer (max 1000)
+	id      string
+	name    string
+	gen     func(t time.Time, r *rand.Rand) []apiMeasurement
+	r       *rand.Rand
+	mu      sync.Mutex
+	history []apiMeasurement // ring buffer (max 1000)
 }
 
 func newSimDevice(id, name string, gen func(time.Time, *rand.Rand) []apiMeasurement) *simDevice {
@@ -132,7 +133,10 @@ func (s *server) add(d *simDevice) {
 }
 
 func (s *server) listDevices(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) { http.Error(w, "forbidden", 403); return }
+	if !s.authOK(r) {
+		http.Error(w, "forbidden", 403)
+		return
+	}
 	devs := s.all()
 	out := make([]apiDevice, 0, len(devs))
 	for _, d := range devs {
@@ -141,7 +145,8 @@ func (s *server) listDevices(w http.ResponseWriter, r *http.Request) {
 		seen := map[string]bool{}
 		for _, m := range sample {
 			if !seen[m.Type] {
-				types = append(types, m.Type); seen[m.Type] = true
+				types = append(types, m.Type)
+				seen[m.Type] = true
 			}
 		}
 		out = append(out, apiDevice{ID: d.id, Name: d.name, Types: types})
@@ -151,9 +156,15 @@ func (s *server) listDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) measurements(w http.ResponseWriter, r *http.Request, deviceID string) {
-	if !s.authOK(r) { http.Error(w, "forbidden", 403); return }
+	if !s.authOK(r) {
+		http.Error(w, "forbidden", 403)
+		return
+	}
 	d, ok := s.get(deviceID)
-	if !ok { http.Error(w, "device not found", 404); return }
+	if !ok {
+		http.Error(w, "device not found", 404)
+		return
+	}
 
 	sinceStr := r.URL.Query().Get("since")
 	since := time.Now().Add(-5 * time.Minute)
@@ -176,14 +187,22 @@ type adminCreateReq struct {
 }
 
 func (s *server) adminCreate(w http.ResponseWriter, r *http.Request) {
-	if !s.authOK(r) { http.Error(w, "forbidden", 403); return }
-	if r.Method != http.MethodPost { http.Error(w, "method", 405); return }
+	if !s.authOK(r) {
+		http.Error(w, "forbidden", 403)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method", 405)
+		return
+	}
 	var req adminCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request: "+err.Error(), 400); return
+		http.Error(w, "bad request: "+err.Error(), 400)
+		return
 	}
 	if req.ID == "" {
-		http.Error(w, "id required", 400); return
+		http.Error(w, "id required", 400)
+		return
 	}
 	var gen func(time.Time, *rand.Rand) []apiMeasurement
 	switch req.Profile {
@@ -196,10 +215,13 @@ func (s *server) adminCreate(w http.ResponseWriter, r *http.Request) {
 	case "presence":
 		gen = genPresence
 	default:
-		http.Error(w, "unknown profile (use temp_humidity|co2|meter|presence)", 400); return
+		http.Error(w, "unknown profile (use temp_humidity|co2|meter|presence)", 400)
+		return
 	}
 	name := req.Name
-	if name == "" { name = req.ID }
+	if name == "" {
+		name = req.ID
+	}
 
 	d := newSimDevice(req.ID, name, gen)
 	// Pré-remplir un peu d'historique pour que le 1er poll ait des données
@@ -218,8 +240,14 @@ func (s *server) adminCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) command(w http.ResponseWriter, r *http.Request, deviceID string) {
-	if !s.authOK(r) { http.Error(w, "forbidden", 403); return }
-	if _, ok := s.devices[deviceID]; !ok { http.Error(w, "device not found", 404); return }
+	if !s.authOK(r) {
+		http.Error(w, "forbidden", 403)
+		return
+	}
+	if _, ok := s.devices[deviceID]; !ok {
+		http.Error(w, "device not found", 404)
+		return
+	}
 	// On ignore le contenu pour la démo, juste 202.
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = w.Write([]byte(`{"status":"queued"}`))
@@ -232,35 +260,42 @@ func (s *server) command(w http.ResponseWriter, r *http.Request, deviceID string
 func genTempHumidity(t time.Time, r *rand.Rand) []apiMeasurement {
 	hour := float64(t.Hour()) + float64(t.Minute())/60.0
 	temp := 21.0 + 4.0*math.Sin(math.Pi*(hour-6)/12.0)
-	if hour < 6 || hour > 20 { temp = 19.0 }
+	if hour < 6 || hour > 20 {
+		temp = 19.0
+	}
 	temp += r.NormFloat64() * 0.3
 	hum := 55.0 - math.Max(0, temp-22)*1.5 + r.NormFloat64()*1.5
 	now := t.UTC().Format(time.RFC3339Nano)
 	return []apiMeasurement{
 		{Timestamp: now, Type: "temperature", Value: round1(temp), Unit: "C", Quality: "good"},
-		{Timestamp: now, Type: "humidity",    Value: round1(hum),  Unit: "%", Quality: "good"},
+		{Timestamp: now, Type: "humidity", Value: round1(hum), Unit: "%", Quality: "good"},
 	}
 }
 
 func genCO2(t time.Time, r *rand.Rand) []apiMeasurement {
 	hour := t.Hour()
 	base := 450.0
-	if hour >= 8 && hour <= 18 { base = 700.0 + 150.0*math.Sin(math.Pi*float64(hour-8)/10) }
+	if hour >= 8 && hour <= 18 {
+		base = 700.0 + 150.0*math.Sin(math.Pi*float64(hour-8)/10)
+	}
 	val := base + r.NormFloat64()*20
 	return []apiMeasurement{{
 		Timestamp: t.UTC().Format(time.RFC3339Nano),
-		Type: "co2", Value: round0(val), Unit: "ppm", Quality: "good",
+		Type:      "co2", Value: round0(val), Unit: "ppm", Quality: "good",
 	}}
 }
 
 var meterIndex = 1234.0
 var meterMu sync.Mutex
+
 func genMeter(t time.Time, r *rand.Rand) []apiMeasurement {
 	meterMu.Lock()
 	defer meterMu.Unlock()
 	hour := t.Hour()
 	power := 250.0
-	if hour >= 8 && hour <= 18 { power = 800.0 }
+	if hour >= 8 && hour <= 18 {
+		power = 800.0
+	}
 	power += r.NormFloat64() * 30
 	meterIndex += power * 10.0 / 3600.0 // 10s incremental
 	return []apiMeasurement{
@@ -276,10 +311,12 @@ func genPresence(t time.Time, r *rand.Rand) []apiMeasurement {
 		prob = 0.85
 	}
 	val := 0.0
-	if r.Float64() < prob { val = 1.0 }
+	if r.Float64() < prob {
+		val = 1.0
+	}
 	return []apiMeasurement{{
 		Timestamp: t.UTC().Format(time.RFC3339Nano),
-		Type: "presence", Value: val, Unit: "bool", Quality: "good",
+		Type:      "presence", Value: val, Unit: "bool", Quality: "good",
 	}}
 }
 
@@ -298,9 +335,9 @@ func main() {
 		apiKey: *apiKey,
 		devices: map[string]*simDevice{
 			"IOTS-TEMP-001": newSimDevice("IOTS-TEMP-001", "Salle réunion T°/H", genTempHumidity),
-			"IOTS-CO2-001":  newSimDevice("IOTS-CO2-001",  "Open space CO2",     genCO2),
-			"IOTS-METER-01": newSimDevice("IOTS-METER-01", "Compteur atelier",   genMeter),
-			"IOTS-PIR-001":  newSimDevice("IOTS-PIR-001",  "PIR couloir",        genPresence),
+			"IOTS-CO2-001":  newSimDevice("IOTS-CO2-001", "Open space CO2", genCO2),
+			"IOTS-METER-01": newSimDevice("IOTS-METER-01", "Compteur atelier", genMeter),
+			"IOTS-PIR-001":  newSimDevice("IOTS-PIR-001", "PIR couloir", genPresence),
 		},
 	}
 
@@ -312,7 +349,9 @@ func main() {
 		now := time.Now()
 		for i := 30; i > 0; i-- {
 			past := now.Add(-time.Duration(i) * (*tick))
-			for _, d := range s.all() { d.tick(past) }
+			for _, d := range s.all() {
+				d.tick(past)
+			}
 		}
 		for {
 			now := <-t.C
@@ -331,22 +370,29 @@ func main() {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
 		parts := strings.Split(path, "/")
 		if len(parts) < 2 {
-			http.Error(w, "not found", 404); return
+			http.Error(w, "not found", 404)
+			return
 		}
 		deviceID := parts[0]
 		switch parts[1] {
 		case "measurements":
-			if r.Method != http.MethodGet { http.Error(w, "method", 405); return }
+			if r.Method != http.MethodGet {
+				http.Error(w, "method", 405)
+				return
+			}
 			s.measurements(w, r, deviceID)
 		case "commands":
-			if r.Method != http.MethodPost { http.Error(w, "method", 405); return }
+			if r.Method != http.MethodPost {
+				http.Error(w, "method", 405)
+				return
+			}
 			s.command(w, r, deviceID)
 		default:
 			http.Error(w, "not found", 404)
 		}
 	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"status":"ok","vendor":"iotsens-fake"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","vendor":"iotsens-fake"}`))
 	})
 
 	log.Printf("[iotsens-fake] listening on %s, api_key=%s, devices=%d", *addr, mask(*apiKey), len(s.devices))
@@ -364,11 +410,25 @@ func logRequests(h http.Handler) http.Handler {
 	})
 }
 
-type statusWriter struct { http.ResponseWriter; status int }
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
 func (s *statusWriter) WriteHeader(c int) { s.status = c; s.ResponseWriter.WriteHeader(c) }
 
-func envOr(k, d string) string { if v := os.Getenv(k); v != "" { return v }; return d }
-func mask(s string) string { if len(s) < 8 { return "***" }; return s[:4] + "***" + s[len(s)-2:] }
+func envOr(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+func mask(s string) string {
+	if len(s) < 8 {
+		return "***"
+	}
+	return s[:4] + "***" + s[len(s)-2:]
+}
 
 // silence unused if compiled bare
 var _ = fmt.Sprintf

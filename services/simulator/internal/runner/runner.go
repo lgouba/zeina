@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
 	"github.com/zeina/hyperviseur/packages/shared/domain"
 	"github.com/zeina/hyperviseur/services/simulator/internal/bus"
 	"github.com/zeina/hyperviseur/services/simulator/internal/profiles"

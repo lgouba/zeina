@@ -6,8 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/zeina/hyperviseur/packages/shared/topics"
 	"gopkg.in/yaml.v3"
+
+	"github.com/zeina/hyperviseur/packages/shared/topics"
 )
 
 // Config — racine YAML.
@@ -42,14 +43,15 @@ type Device struct {
 	Type         string        `yaml:"type"` // environment | presence | linky | actuator
 	Interval     time.Duration `yaml:"interval"`
 	Schedule     string        `yaml:"schedule,omitempty"`      // ex: "occupied 08:00-18:00 mon-fri"
-	Measurements []string      `yaml:"measurements,omitempty"` // pour environment
+	Measurements []string      `yaml:"measurements,omitempty"`  // pour environment
 	InitialState string        `yaml:"initial_state,omitempty"` // actuator
 	Couplings    Couplings     `yaml:"couplings,omitempty"`
 }
 
 // Couplings — référence à d'autres devices de la même zone, lus via le bus.
-//   light_relay : id du relais lumière (utilisé par lux & linky pour augmenter la conso)
-//   presence    : id du capteur de présence (utilisé par CO2/T° pour modèle d'occupation)
+//
+//	light_relay : id du relais lumière (utilisé par lux & linky pour augmenter la conso)
+//	presence    : id du capteur de présence (utilisé par CO2/T° pour modèle d'occupation)
 type Couplings struct {
 	LightRelay string `yaml:"light_relay,omitempty"`
 	Presence   string `yaml:"presence,omitempty"`
@@ -79,9 +81,8 @@ func (c *Config) applyDefaults() {
 	if c.ClientIDPrefix == "" {
 		c.ClientIDPrefix = "zeina-sim"
 	}
-	if c.MeasurementQoS == 0 {
-		// 0 explicite reste 0 ; YAML int absent → 0 → on tolère, mesures sont OK en QoS 0.
-	}
+	// MeasurementQoS : 0 explicite reste 0 (YAML int absent → 0 → tolérable,
+	// les mesures sont OK en QoS 0). On ne force pas de défaut ici.
 	if c.StateQoS == 0 {
 		c.StateQoS = 1 // ACK doivent passer
 	}

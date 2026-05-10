@@ -47,34 +47,34 @@ func (h *AlarmsHandler) RegisterWrite(g *echo.Group) {
 // ----------------------------------------------------------------------------
 
 type alarmOut struct {
-	ID                uuid.UUID  `json:"id"`
-	TenantID          uuid.UUID  `json:"tenant_id"`
-	SiteID            uuid.UUID  `json:"site_id"`
-	RuleID            uuid.UUID  `json:"rule_id"`
-	RuleName          string     `json:"rule_name"`
-	DeviceID          *uuid.UUID `json:"device_id,omitempty"`
-	DeviceSlug        *string    `json:"device_slug,omitempty"`
-	DeviceName        *string    `json:"device_name,omitempty"`
-	ZoneID            *uuid.UUID `json:"zone_id,omitempty"`
-	ZoneName          *string    `json:"zone_name,omitempty"`
-	Label             string     `json:"label"`
-	Name              string     `json:"name"`
-	Description       *string    `json:"description,omitempty"`
-	Severity          string     `json:"severity"`
-	Model             string     `json:"model"`
-	StatusText        *string    `json:"status_text,omitempty"`
-	State             string     `json:"state"`
-	Attribute         *string    `json:"attribute,omitempty"`
-	TriggerCount      int        `json:"trigger_count"`
-	LastValue         *float64   `json:"last_value,omitempty"`
-	Unit              *string    `json:"unit,omitempty"`
-	OpenedAt          time.Time  `json:"opened_at"`
-	LastTriggeredAt   time.Time  `json:"last_triggered_at"`
-	AckedAt           *time.Time `json:"acked_at,omitempty"`
-	ResolvedAt        *time.Time `json:"resolved_at,omitempty"`
-	ArchivedAt        *time.Time `json:"archived_at,omitempty"`
-	AckUserEmail      *string    `json:"ack_user_email,omitempty"`
-	ResolveUserEmail  *string    `json:"resolve_user_email,omitempty"`
+	ID               uuid.UUID  `json:"id"`
+	TenantID         uuid.UUID  `json:"tenant_id"`
+	SiteID           uuid.UUID  `json:"site_id"`
+	RuleID           uuid.UUID  `json:"rule_id"`
+	RuleName         string     `json:"rule_name"`
+	DeviceID         *uuid.UUID `json:"device_id,omitempty"`
+	DeviceSlug       *string    `json:"device_slug,omitempty"`
+	DeviceName       *string    `json:"device_name,omitempty"`
+	ZoneID           *uuid.UUID `json:"zone_id,omitempty"`
+	ZoneName         *string    `json:"zone_name,omitempty"`
+	Label            string     `json:"label"`
+	Name             string     `json:"name"`
+	Description      *string    `json:"description,omitempty"`
+	Severity         string     `json:"severity"`
+	Model            string     `json:"model"`
+	StatusText       *string    `json:"status_text,omitempty"`
+	State            string     `json:"state"`
+	Attribute        *string    `json:"attribute,omitempty"`
+	TriggerCount     int        `json:"trigger_count"`
+	LastValue        *float64   `json:"last_value,omitempty"`
+	Unit             *string    `json:"unit,omitempty"`
+	OpenedAt         time.Time  `json:"opened_at"`
+	LastTriggeredAt  time.Time  `json:"last_triggered_at"`
+	AckedAt          *time.Time `json:"acked_at,omitempty"`
+	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`
+	ArchivedAt       *time.Time `json:"archived_at,omitempty"`
+	AckUserEmail     *string    `json:"ack_user_email,omitempty"`
+	ResolveUserEmail *string    `json:"resolve_user_email,omitempty"`
 }
 
 type alarmEventOut struct {
@@ -359,7 +359,7 @@ func (h *AlarmsHandler) transition(c echo.Context, target, label string) error {
 	if err != nil {
 		return apperr.Wrap(apperr.KindInternal, "begin tx", err)
 	}
-	defer tx.Rollback(c.Request().Context())
+	defer func() { _ = tx.Rollback(c.Request().Context()) }()
 
 	var setExtra string
 	switch target {

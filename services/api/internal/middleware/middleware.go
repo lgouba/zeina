@@ -195,7 +195,7 @@ func (rl *RateLimiter) allow(key string) bool {
 // Stockage en mémoire (per-process). Pour multi-replica, migrer vers Redis.
 
 type authBucket struct {
-	count   int
+	count    int
 	windowAt time.Time
 }
 

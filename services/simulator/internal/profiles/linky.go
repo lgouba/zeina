@@ -31,7 +31,7 @@ type linkyState struct {
 	LastTick int64   // unix nano du dernier tick (pour delta-t)
 }
 
-func (l *Linky) InitState() any                     { return &linkyState{} }
+func (l *Linky) InitState() any                    { return &linkyState{} }
 func (l *Linky) InitialStatePayload(*State) []byte { return nil }
 
 func (l *Linky) HandleCommand(_ context.Context, _ *State, _ domain.CommandPayload) ([]byte, error) {

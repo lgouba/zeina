@@ -32,8 +32,10 @@ import (
 
 	"github.com/zeina/hyperviseur/packages/shared/jwt"
 
+	"github.com/zeina/hyperviseur/services/api/internal/activation"
 	"github.com/zeina/hyperviseur/services/api/internal/audit"
 	"github.com/zeina/hyperviseur/services/api/internal/handlers"
+	"github.com/zeina/hyperviseur/services/api/internal/mailer"
 	mw "github.com/zeina/hyperviseur/services/api/internal/middleware"
 	"github.com/zeina/hyperviseur/services/api/internal/rbac"
 )
@@ -94,14 +96,17 @@ func setupHarness(t *testing.T) *harness {
 	resolver := rbac.NewResolver(pool)
 
 	v1 := e.Group("/v1")
-	authH := handlers.NewAuthHandler(pool, signer)
+	// Mailer en mode stub (pas de SMTP_HOST), activation service réel.
+	mailSvc := mailer.New(mailer.Config{}, zerolog.Nop())
+	activationSvc := activation.NewService(pool)
+	authH := handlers.NewAuthHandler(pool, signer, activationSvc, mailSvc, auditLog, "http://test.local", "ZEINA", zerolog.Nop())
 	authH.Register(v1.Group("/auth"))
 
 	authed := v1.Group("", mw.RequireAuth(signer))
 	authH.RegisterMe(authed.Group("/auth"))
 
 	tenantAdmin := authed.Group("", mw.RequireTenantOwner())
-	handlers.NewUsersHandler(pool, auditLog).Register(tenantAdmin)
+	handlers.NewUsersHandler(pool, auditLog, mailSvc, activationSvc, "http://test.local", "ZEINA", zerolog.Nop()).Register(tenantAdmin)
 	handlers.NewRolesHandler(pool, auditLog).Register(tenantAdmin)
 	handlers.NewAuditHandler(pool).Register(tenantAdmin)
 

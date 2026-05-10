@@ -54,22 +54,22 @@ func (h *DevicesHandler) RegisterWrite(g *echo.Group) {
 }
 
 type deviceOut struct {
-	ID          uuid.UUID       `json:"id"`
-	ZoneID      uuid.UUID       `json:"zone_id"`
-	SiteID      uuid.UUID       `json:"site_id"`
-	Slug        string          `json:"slug"`
-	Name        *string         `json:"name,omitempty"`
-	Type        string          `json:"type"`
-	Category    *string         `json:"category,omitempty"`
-	Model       *string         `json:"model,omitempty"`
-	Status      string          `json:"status"`
-	LastSeen    *time.Time      `json:"last_seen_at,omitempty"`
-	InstalledAt *time.Time      `json:"installed_at,omitempty"`
+	ID          uuid.UUID  `json:"id"`
+	ZoneID      uuid.UUID  `json:"zone_id"`
+	SiteID      uuid.UUID  `json:"site_id"`
+	Slug        string     `json:"slug"`
+	Name        *string    `json:"name,omitempty"`
+	Type        string     `json:"type"`
+	Category    *string    `json:"category,omitempty"`
+	Model       *string    `json:"model,omitempty"`
+	Status      string     `json:"status"`
+	LastSeen    *time.Time `json:"last_seen_at,omitempty"`
+	InstalledAt *time.Time `json:"installed_at,omitempty"`
 	// Username MQTT du device — non exposé en API (détail de provisioning).
 	// Retourné uniquement à la création via createDeviceResp.MQTTUsername.
-	MQTTID string `json:"-"`
-	Metadata    json.RawMessage `json:"metadata,omitempty"`
-	ModelID     *uuid.UUID      `json:"model_id,omitempty"`
+	MQTTID   string          `json:"-"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+	ModelID  *uuid.UUID      `json:"model_id,omitempty"`
 }
 
 // ensureDeviceVisible vérifie que device appartient au tenant courant et

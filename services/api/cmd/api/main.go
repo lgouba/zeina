@@ -206,10 +206,10 @@ func main() {
 	auth.GET("/sites/:id/devices", devicesH.ListBySite, devRead(mw.SiteFromParam("id")))
 	// --- Zones (gestion arborescence : zone géo → bât. → étage → pièce) ---
 	zonesH := handlers.NewZonesHandler(pool, auditLog)
-	auth.GET("/sites/:id/zones",   zonesH.List,   devRead(mw.SiteFromParam("id")))
-	auth.POST("/sites/:id/zones",  zonesH.Create, devWrite(mw.SiteFromParam("id")))
-	auth.PUT("/zones/:id",         zonesH.Update, devWrite(mw.SiteFromZone(pool, "id")))
-	auth.DELETE("/zones/:id",      zonesH.Delete, devWrite(mw.SiteFromZone(pool, "id")))
+	auth.GET("/sites/:id/zones", zonesH.List, devRead(mw.SiteFromParam("id")))
+	auth.POST("/sites/:id/zones", zonesH.Create, devWrite(mw.SiteFromParam("id")))
+	auth.PUT("/zones/:id", zonesH.Update, devWrite(mw.SiteFromZone(pool, "id")))
+	auth.DELETE("/zones/:id", zonesH.Delete, devWrite(mw.SiteFromZone(pool, "id")))
 
 	auth.POST("/sites/:id/devices", devicesH.Create, devWrite(mw.SiteFromParam("id")))
 	auth.PUT("/devices/:id", devicesH.Update, devWrite(mw.SiteFromDevice(pool, "id")))
@@ -254,15 +254,15 @@ func main() {
 	// --- Alarmes (workflow d'incident) -- permission rules:read pour la lecture,
 	// rules:write pour ack / resolve / archive / commentaires.
 	alarmsH := handlers.NewAlarmsHandler(pool)
-	auth.GET("/sites/:id/alarms",          alarmsH.ListBySite,    ruleRead(mw.SiteFromParam("id")))
-	auth.GET("/sites/:id/alarms/counts",   alarmsH.Counts,        ruleRead(mw.SiteFromParam("id")))
-	auth.GET("/alarms/:id",                alarmsH.Get,           ruleRead(mw.SiteFromAlarm(pool, "id")))
-	auth.GET("/alarms/:id/events",         alarmsH.ListEvents,    ruleRead(mw.SiteFromAlarm(pool, "id")))
-	auth.GET("/alarms/:id/comments",       alarmsH.ListComments,  ruleRead(mw.SiteFromAlarm(pool, "id")))
-	auth.POST("/alarms/:id/acknowledge",   alarmsH.Acknowledge,   ruleWrite(mw.SiteFromAlarm(pool, "id")))
-	auth.POST("/alarms/:id/resolve",       alarmsH.Resolve,       ruleWrite(mw.SiteFromAlarm(pool, "id")))
-	auth.POST("/alarms/:id/archive",       alarmsH.Archive,       ruleWrite(mw.SiteFromAlarm(pool, "id")))
-	auth.POST("/alarms/:id/comments",      alarmsH.AddComment,    ruleWrite(mw.SiteFromAlarm(pool, "id")))
+	auth.GET("/sites/:id/alarms", alarmsH.ListBySite, ruleRead(mw.SiteFromParam("id")))
+	auth.GET("/sites/:id/alarms/counts", alarmsH.Counts, ruleRead(mw.SiteFromParam("id")))
+	auth.GET("/alarms/:id", alarmsH.Get, ruleRead(mw.SiteFromAlarm(pool, "id")))
+	auth.GET("/alarms/:id/events", alarmsH.ListEvents, ruleRead(mw.SiteFromAlarm(pool, "id")))
+	auth.GET("/alarms/:id/comments", alarmsH.ListComments, ruleRead(mw.SiteFromAlarm(pool, "id")))
+	auth.POST("/alarms/:id/acknowledge", alarmsH.Acknowledge, ruleWrite(mw.SiteFromAlarm(pool, "id")))
+	auth.POST("/alarms/:id/resolve", alarmsH.Resolve, ruleWrite(mw.SiteFromAlarm(pool, "id")))
+	auth.POST("/alarms/:id/archive", alarmsH.Archive, ruleWrite(mw.SiteFromAlarm(pool, "id")))
+	auth.POST("/alarms/:id/comments", alarmsH.AddComment, ruleWrite(mw.SiteFromAlarm(pool, "id")))
 
 	// --- Commands : pilote un actionneur → permission devices:write --------
 	cmdsH := handlers.NewCommandsHandler(pool, mqttClient, *tenantSlug)

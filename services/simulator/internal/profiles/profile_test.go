@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/zeina/hyperviseur/packages/shared/domain"
 	"github.com/zeina/hyperviseur/services/simulator/internal/bus"
 	"github.com/zeina/hyperviseur/services/simulator/internal/scheduler"

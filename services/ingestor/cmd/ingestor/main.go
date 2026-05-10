@@ -33,16 +33,16 @@ import (
 
 func main() {
 	var (
-		databaseURL    = flag.String("database-url", envOr("DATABASE_URL", ""), "Postgres DSN")
-		broker         = flag.String("broker", envOr("MQTT_BROKER", "tcp://mosquitto:1883"), "MQTT broker URL")
-		mqttUser       = flag.String("mqtt-user", envOr("MQTT_USER", "ingestor"), "MQTT username")
-		mqttPwd        = flag.String("mqtt-password", envOr("MQTT_PASSWORD", "changeme_ingestor"), "MQTT password")
-		batchSize      = flag.Int("batch-size", envInt("INGESTOR_BATCH_SIZE", 500), "max messages per batch")
-		batchTimeout   = flag.Duration("batch-timeout", envDur("INGESTOR_BATCH_TIMEOUT", time.Second), "max delay before flush")
-		channelBuffer  = flag.Int("channel-buffer", envInt("INGESTOR_CHANNEL_BUFFER", 10000), "buffer between consumer and batcher")
-		metricsAddr    = flag.String("metrics-addr", ":"+envOr("INGESTOR_METRICS_PORT", "9090"), "Prometheus metrics listen address")
-		logLevel       = flag.String("log-level", envOr("LOG_LEVEL", "info"), "log level")
-		logFormat      = flag.String("log-format", envOr("LOG_FORMAT", "json"), "log format")
+		databaseURL   = flag.String("database-url", envOr("DATABASE_URL", ""), "Postgres DSN")
+		broker        = flag.String("broker", envOr("MQTT_BROKER", "tcp://mosquitto:1883"), "MQTT broker URL")
+		mqttUser      = flag.String("mqtt-user", envOr("MQTT_USER", "ingestor"), "MQTT username")
+		mqttPwd       = flag.String("mqtt-password", envOr("MQTT_PASSWORD", "changeme_ingestor"), "MQTT password")
+		batchSize     = flag.Int("batch-size", envInt("INGESTOR_BATCH_SIZE", 500), "max messages per batch")
+		batchTimeout  = flag.Duration("batch-timeout", envDur("INGESTOR_BATCH_TIMEOUT", time.Second), "max delay before flush")
+		channelBuffer = flag.Int("channel-buffer", envInt("INGESTOR_CHANNEL_BUFFER", 10000), "buffer between consumer and batcher")
+		metricsAddr   = flag.String("metrics-addr", ":"+envOr("INGESTOR_METRICS_PORT", "9090"), "Prometheus metrics listen address")
+		logLevel      = flag.String("log-level", envOr("LOG_LEVEL", "info"), "log level")
+		logFormat     = flag.String("log-format", envOr("LOG_FORMAT", "json"), "log format")
 	)
 	flag.Parse()
 

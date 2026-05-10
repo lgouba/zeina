@@ -9,21 +9,21 @@ import (
 // WelcomeData regroupe les variables utilisées par le template "première
 // connexion" envoyé à un user créé par un admin.
 type WelcomeData struct {
-	FullName string // peut être vide → "Bonjour"
-	Email    string
-	Code     string // 6 chiffres
-	URL      string // ex: https://zeina.qalitylabs.fr/first-login?email=alice@x.com
-	BrandName string
+	FullName      string // peut être vide → "Bonjour"
+	Email         string
+	Code          string // 6 chiffres
+	URL           string // ex: https://zeina.qalitylabs.fr/first-login?email=alice@x.com
+	BrandName     string
 	ExpireMinutes int // ex: 15
 }
 
 // ResetData regroupe les variables du template "mot de passe oublié".
 type ResetData struct {
-	FullName string
-	Email    string
-	Code     string
-	URL      string
-	BrandName string
+	FullName      string
+	Email         string
+	Code          string
+	URL           string
+	BrandName     string
 	ExpireMinutes int
 }
 

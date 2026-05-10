@@ -1,5 +1,7 @@
 // Package scheduler parse et évalue les schedules d'occupation type
-//   "occupied 08:00-18:00 mon-fri"
+//
+//	"occupied 08:00-18:00 mon-fri"
+//
 // utilisés par les capteurs PIR virtuels pour simuler une occupation réaliste.
 package scheduler
 
@@ -24,9 +26,9 @@ type Schedule struct {
 // Parse accepte deux formes :
 //   - "" → nil, nil
 //   - "occupied HH:MM-HH:MM dow1-dow2" — exemples :
-//       "occupied 08:00-18:00 mon-fri"
-//       "occupied 09:00-17:00 mon-sat"
-//       "occupied 00:00-23:59 mon-sun"
+//     "occupied 08:00-18:00 mon-fri"
+//     "occupied 09:00-17:00 mon-sat"
+//     "occupied 00:00-23:59 mon-sun"
 //
 // Les jours sont en anglais 3 lettres minuscules : mon|tue|wed|thu|fri|sat|sun.
 // Le séparateur jour peut être "-" pour une plage continue ou "," pour une liste

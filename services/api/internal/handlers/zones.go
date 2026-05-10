@@ -55,11 +55,11 @@ func isValidKind(k string) bool {
 // allowedParents — règles métier de containment. Une chaîne vide dans la
 // liste représente "aucun parent" (zone racine).
 //
-//   geographic     ne peut être qu'à la racine
-//   building_group dans geographic uniquement
-//   building       dans geographic ou building_group
-//   floor          dans building (le seul cas d'imbrication étage)
-//   room           partout sauf dans une autre room
+//	geographic     ne peut être qu'à la racine
+//	building_group dans geographic uniquement
+//	building       dans geographic ou building_group
+//	floor          dans building (le seul cas d'imbrication étage)
+//	room           partout sauf dans une autre room
 //
 // Ces règles sont appliquées côté backend (Create + Update) et côté UI
 // pour filtrer les dropdowns / sous-menus — synchronisées avec

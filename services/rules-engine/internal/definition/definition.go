@@ -169,12 +169,12 @@ type Action struct {
 	// alarm — crée (ou réveille) une alarme dans la table `alarms`. Chaque
 	// re-déclenchement de la même règle sur le même device incrémente le
 	// compteur et ajoute un event au lieu de créer une nouvelle alarme.
-	Severity    string `json:"severity,omitempty"`     // minor | major | critical
-	Label       string `json:"label,omitempty"`        // ex: "Dépassement de seuil"
-	Name        string `json:"name,omitempty"`         // ex: "CO₂ Salle 204"
+	Severity    string `json:"severity,omitempty"` // minor | major | critical
+	Label       string `json:"label,omitempty"`    // ex: "Dépassement de seuil"
+	Name        string `json:"name,omitempty"`     // ex: "CO₂ Salle 204"
 	Description string `json:"description,omitempty"`
-	Model       string `json:"model,omitempty"`        // ex: "Standard"
-	StatusText  string `json:"status_text,omitempty"`  // ex: "Comportement anormal"
+	Model       string `json:"model,omitempty"`       // ex: "Standard"
+	StatusText  string `json:"status_text,omitempty"` // ex: "Comportement anormal"
 }
 
 // Validate vérifie l'invariant de structure d'une règle.

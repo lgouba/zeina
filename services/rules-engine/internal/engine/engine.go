@@ -56,14 +56,16 @@ type Engine struct {
 	// Cache device_slug → (site_slug, zone_slug) par tenant — utilisé par
 	// l'executor pour construire les topics MQTT cmd. Refresh périodique.
 	devMu sync.RWMutex
-	dev   map[string]devLoc // key = tenant + "/" + device_slug
+	dev   map[string]DevLoc // key = tenant + "/" + device_slug
 
 	// Tracking des cron entry ids actifs pour pouvoir les retirer au reload.
 	cronMu      sync.Mutex
 	cronEntries map[uuid.UUID]cron.EntryID
 }
 
-type devLoc struct {
+// DevLoc — résolution device_slug → contexte (site, zone, type) issu de la
+// DB et caché en mémoire pour éviter les requêtes par message MQTT.
+type DevLoc struct {
 	SiteSlug   string
 	SiteName   string
 	ZoneID     string
@@ -90,7 +92,7 @@ func New(pool *pgxpool.Pool, st *store.Store, sst *state.State, mqtt *sharedmqtt
 		state:       sst,
 		mqtt:        mqtt,
 		log:         log.With().Str("component", "engine").Logger(),
-		dev:         make(map[string]devLoc),
+		dev:         make(map[string]DevLoc),
 		cronEntries: make(map[uuid.UUID]cron.EntryID),
 	}
 	e.exec = actions.NewExecutor(mqtt, e, log)
@@ -138,14 +140,14 @@ func (e *Engine) RefreshDeviceMap(ctx context.Context) error {
 		return err
 	}
 	defer rows.Close()
-	next := make(map[string]devLoc, 64)
+	next := make(map[string]DevLoc, 64)
 	for rows.Next() {
 		var ts, ss, sn, zs, zn, ds, dn, dt string
 		var zid uuid.UUID
 		if err := rows.Scan(&ts, &ss, &sn, &zid, &zs, &zn, &ds, &dn, &dt); err != nil {
 			continue
 		}
-		next[ts+"/"+ds] = devLoc{
+		next[ts+"/"+ds] = DevLoc{
 			SiteSlug: ss, SiteName: sn,
 			ZoneID: zid.String(), ZoneSlug: zs, ZoneName: zn,
 			DeviceName: dn, DeviceType: dt,
@@ -157,8 +159,8 @@ func (e *Engine) RefreshDeviceMap(ctx context.Context) error {
 	return nil
 }
 
-// LookupDevice retourne le devLoc pour (tenant, device_slug) ou false.
-func (e *Engine) LookupDevice(tenantSlug, deviceSlug string) (devLoc, bool) {
+// LookupDevice retourne le DevLoc pour (tenant, device_slug) ou false.
+func (e *Engine) LookupDevice(tenantSlug, deviceSlug string) (DevLoc, bool) {
 	e.devMu.RLock()
 	defer e.devMu.RUnlock()
 	d, ok := e.dev[tenantSlug+"/"+deviceSlug]
@@ -250,10 +252,8 @@ func (e *Engine) onMessage(topic string, payload []byte) {
 			if t.ZoneScope.DeviceType != "" && pubLoc.DeviceType != t.ZoneScope.DeviceType {
 				continue
 			}
-		} else {
-			if t.DeviceSlug != parts.Device {
-				continue
-			}
+		} else if t.DeviceSlug != parts.Device {
+			continue
 		}
 		// Time window : la règle ne s'évalue qu'à l'intérieur de son créneau.
 		if !r.Definition.TimeWindow.IsActiveAt(time.Now()) {

@@ -39,11 +39,11 @@ func TestParseExplicitList(t *testing.T) {
 
 func TestParseInvalid(t *testing.T) {
 	cases := []string{
-		"08:00-18:00 mon-fri",            // manque "occupied"
-		"occupied 08-18 mon-fri",         // mauvais format heure
-		"occupied 25:00-26:00 mon-fri",   // heure invalide
-		"occupied 08:00-18:00 mon-zzz",   // jour invalide
-		"occupied 08:00-18:00",           // pas de jours
+		"08:00-18:00 mon-fri",          // manque "occupied"
+		"occupied 08-18 mon-fri",       // mauvais format heure
+		"occupied 25:00-26:00 mon-fri", // heure invalide
+		"occupied 08:00-18:00 mon-zzz", // jour invalide
+		"occupied 08:00-18:00",         // pas de jours
 	}
 	for _, c := range cases {
 		t.Run(c, func(t *testing.T) {

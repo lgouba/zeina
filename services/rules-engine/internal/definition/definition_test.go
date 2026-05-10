@@ -16,8 +16,8 @@ func TestTimeWindowNilAlwaysActive(t *testing.T) {
 func TestTimeWindowDays(t *testing.T) {
 	// Lundi-vendredi (1..5) uniquement.
 	w := &TimeWindow{Days: []int{1, 2, 3, 4, 5}}
-	mon := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)  // lundi
-	sat := time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC)  // samedi
+	mon := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC) // lundi
+	sat := time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC) // samedi
 	if !w.IsActiveAt(mon) {
 		t.Error("monday should be active")
 	}

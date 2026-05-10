@@ -692,10 +692,7 @@ func sanitizeProfileFields(first, last, full, job, phone **string) error {
 	if err := sanitizeOpt(job, maxJobTitleLen, "job_title"); err != nil {
 		return err
 	}
-	if err := sanitizeOpt(phone, maxPhoneLen, "phone"); err != nil {
-		return err
-	}
-	return nil
+	return sanitizeOpt(phone, maxPhoneLen, "phone")
 }
 
 func sanitizeOpt(p **string, maxLen int, field string) error {

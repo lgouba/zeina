@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
 	"github.com/zeina/hyperviseur/packages/shared/logger"
 	"github.com/zeina/hyperviseur/packages/shared/mqtt"
 	"github.com/zeina/hyperviseur/packages/shared/topics"

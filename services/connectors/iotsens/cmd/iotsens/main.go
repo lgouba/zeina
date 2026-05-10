@@ -23,17 +23,17 @@ import (
 
 func main() {
 	var (
-		databaseURL  = flag.String("database-url", envOr("DATABASE_URL", ""), "Postgres DSN")
-		broker       = flag.String("broker", envOr("MQTT_BROKER", "tcp://mosquitto:1883"), "MQTT broker URL")
-		mqttUser     = flag.String("mqtt-user", envOr("MQTT_USER", "simulator"), "MQTT username")
-		mqttPwd      = flag.String("mqtt-password", envOr("MQTT_PASSWORD", "changeme_sim"), "MQTT password")
-		iotsensURL   = flag.String("iotsens-url", envOr("IOTSENS_URL", "http://iotsens-fake:8081"), "IoTSens API base URL")
-		iotsensKey   = flag.String("iotsens-api-key", envOr("IOTSENS_API_KEY", "demo-key-iotsens"), "IoTSens X-API-Key")
-		mapperEvery  = flag.Duration("mapper-refresh", envDur("IOTSENS_MAPPER_REFRESH", 30*time.Second), "DB mapping refresh period")
-		reconcileEv  = flag.Duration("reconcile-every", envDur("IOTSENS_RECONCILE", 15*time.Second), "poller supervisor reconciliation period")
-		metricsAddr  = flag.String("metrics-addr", ":"+envOr("IOTSENS_METRICS_PORT", "9092"), "Prometheus metrics listen address")
-		logLevel     = flag.String("log-level", envOr("LOG_LEVEL", "info"), "log level")
-		logFormat    = flag.String("log-format", envOr("LOG_FORMAT", "json"), "log format")
+		databaseURL = flag.String("database-url", envOr("DATABASE_URL", ""), "Postgres DSN")
+		broker      = flag.String("broker", envOr("MQTT_BROKER", "tcp://mosquitto:1883"), "MQTT broker URL")
+		mqttUser    = flag.String("mqtt-user", envOr("MQTT_USER", "simulator"), "MQTT username")
+		mqttPwd     = flag.String("mqtt-password", envOr("MQTT_PASSWORD", "changeme_sim"), "MQTT password")
+		iotsensURL  = flag.String("iotsens-url", envOr("IOTSENS_URL", "http://iotsens-fake:8081"), "IoTSens API base URL")
+		iotsensKey  = flag.String("iotsens-api-key", envOr("IOTSENS_API_KEY", "demo-key-iotsens"), "IoTSens X-API-Key")
+		mapperEvery = flag.Duration("mapper-refresh", envDur("IOTSENS_MAPPER_REFRESH", 30*time.Second), "DB mapping refresh period")
+		reconcileEv = flag.Duration("reconcile-every", envDur("IOTSENS_RECONCILE", 15*time.Second), "poller supervisor reconciliation period")
+		metricsAddr = flag.String("metrics-addr", ":"+envOr("IOTSENS_METRICS_PORT", "9092"), "Prometheus metrics listen address")
+		logLevel    = flag.String("log-level", envOr("LOG_LEVEL", "info"), "log level")
+		logFormat   = flag.String("log-format", envOr("LOG_FORMAT", "json"), "log format")
 	)
 	flag.Parse()
 
@@ -101,11 +101,19 @@ func main() {
 	log.Info().Msg("bye")
 }
 
-func envOr(k, d string) string { if v := os.Getenv(k); v != "" { return v }; return d }
-func envDur(k string, d time.Duration) time.Duration {
+func envOr(k, d string) string {
 	if v := os.Getenv(k); v != "" {
-		if x, err := time.ParseDuration(v); err == nil { return x }
+		return v
 	}
 	return d
 }
+func envDur(k string, d time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		if x, err := time.ParseDuration(v); err == nil {
+			return x
+		}
+	}
+	return d
+}
+
 var _ = strconv.Atoi // future use

@@ -14,10 +14,10 @@ import (
 //   - état initial publié sur "state" au démarrage du runner
 //   - Tick ne produit aucune mesure (l'actuator ne mesure rien)
 //   - sur réception d'une commande {"state":"on"} ou {"state":"off"} :
-//       1. met à jour son état interne
-//       2. publie l'état partagé sur le Bus (consommé par environment, linky)
-//       3. retourne le payload "state" sérialisé que le runner publie sur
-//          le topic state, avec cmd_id repris pour ACK côté API/rules.
+//     1. met à jour son état interne
+//     2. publie l'état partagé sur le Bus (consommé par environment, linky)
+//     3. retourne le payload "state" sérialisé que le runner publie sur
+//     le topic state, avec cmd_id repris pour ACK côté API/rules.
 type Actuator struct {
 	initial string
 }

@@ -25,8 +25,8 @@ type Poller struct {
 	mapper *mapper.Mapper
 	log    zerolog.Logger
 
-	mu     sync.Mutex
-	tasks  map[string]context.CancelFunc // ext_id → cancel
+	mu    sync.Mutex
+	tasks map[string]context.CancelFunc // ext_id → cancel
 }
 
 func New(c *client.Client, m *sharedmqtt.Client, mp *mapper.Mapper, log zerolog.Logger) *Poller {

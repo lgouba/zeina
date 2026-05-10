@@ -38,8 +38,8 @@ type Resolver struct {
 	posTTL     time.Duration // TTL d'un cache hit (positif)
 	negTTL     time.Duration // TTL d'un cache miss (négatif) — plus court
 
-	mu     sync.RWMutex
-	cache  map[Key]Entry
+	mu    sync.RWMutex
+	cache map[Key]Entry
 }
 
 func New(pool *pgxpool.Pool, log zerolog.Logger) *Resolver {

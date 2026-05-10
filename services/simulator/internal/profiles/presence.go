@@ -21,7 +21,7 @@ type presenceState struct {
 	Last bool
 }
 
-func (p *Presence) InitState() any                     { return &presenceState{} }
+func (p *Presence) InitState() any                    { return &presenceState{} }
 func (p *Presence) InitialStatePayload(*State) []byte { return nil }
 
 func (p *Presence) HandleCommand(_ context.Context, _ *State, _ domain.CommandPayload) ([]byte, error) {

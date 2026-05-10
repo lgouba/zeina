@@ -48,8 +48,8 @@ const (
 // avec le bon status, mais pour la sécurité on retourne souvent le même
 // message générique au client.
 var (
-	ErrInvalidCode = errors.New("activation: invalid code")
-	ErrExpiredCode = errors.New("activation: code expired")
+	ErrInvalidCode     = errors.New("activation: invalid code")
+	ErrExpiredCode     = errors.New("activation: code expired")
 	ErrTooManyAttempts = errors.New("activation: too many attempts")
 )
 
@@ -63,10 +63,11 @@ func NewService(pool *pgxpool.Pool) *Service {
 }
 
 // GenerateCode — un entier aléatoire 6 chiffres formaté avec leading zeros.
-//   "042817", "999999", "000003" sont tous valides.
+//
+//	"042817", "999999", "000003" sont tous valides.
 func GenerateCode() (string, error) {
-	max := big.NewInt(1_000_000)
-	n, err := rand.Int(rand.Reader, max)
+	upper := big.NewInt(1_000_000)
+	n, err := rand.Int(rand.Reader, upper)
 	if err != nil {
 		return "", err
 	}

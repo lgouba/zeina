@@ -184,12 +184,12 @@ func (s *Store) AutoResolveByRuleAndDevice(ctx context.Context, ruleID uuid.UUID
 // LookupContext — résout en une seule requête (tenant_id, site_id, device_id,
 // zone_id, unit) à partir du tenant_slug + device_slug + measurement.
 type LookupResult struct {
-	TenantID  uuid.UUID
-	SiteID    uuid.UUID
-	DeviceID  *uuid.UUID
-	ZoneID    *uuid.UUID
-	Unit      string
-	Found     bool
+	TenantID uuid.UUID
+	SiteID   uuid.UUID
+	DeviceID *uuid.UUID
+	ZoneID   *uuid.UUID
+	Unit     string
+	Found    bool
 }
 
 func (s *Store) LookupContext(ctx context.Context, tenantSlug, deviceSlug, measurement string) (LookupResult, error) {

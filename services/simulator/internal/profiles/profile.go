@@ -19,7 +19,7 @@ import (
 // Pour un device "environment" qui publie 4 measurements (T/H/CO2/lux), Tick
 // retourne 4 Reading dans une seule slice.
 type Reading struct {
-	Name    string         // ex: "temperature", "co2", "papp"
+	Name    string // ex: "temperature", "co2", "papp"
 	Value   float64
 	Unit    string         // ex: "celsius", "ppm", "watt"
 	Quality domain.Quality // par défaut "good"

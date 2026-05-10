@@ -306,7 +306,7 @@ type verifyCodeReq struct {
 }
 
 type verifyCodeResp struct {
-	Nonce     string    `json:"nonce"`      // JWT court à passer à set-password
+	Nonce     string    `json:"nonce"` // JWT court à passer à set-password
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
