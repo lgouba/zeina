@@ -1,13 +1,17 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Building2, MapPin, Plus, Pencil, Trash2, X, Cpu, Sparkles, Bell, LayoutDashboard } from "lucide-react";
+import { Building2, MapPin, Plus, Pencil, Trash2, X, Cpu, Sparkles, Bell, LayoutDashboard, Map as MapIcon, LayoutGrid } from "lucide-react";
 import { api, HttpError } from "../lib/api";
 import { useAuth, useIsTenantAdmin } from "../lib/auth";
 import { Help } from "../components/Tooltip";
 import { useConfirm } from "../components/ConfirmDialog";
+import { SitesGlobeMap } from "../components/SitesGlobeMap";
 import type { Site, SiteSummary } from "../types/api";
 
 const inputCls = "block w-full rounded-md bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-brand-500";
+
+type ViewMode = "map" | "grid";
+const VIEW_KEY = "zeina_sites_view";
 
 export function SitesHome() {
   const { user, token, refreshMe } = useAuth();
@@ -18,6 +22,12 @@ export function SitesHome() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Site | null>(null);
+  const [view, setView] = useState<ViewMode>(() => {
+    try { return (localStorage.getItem(VIEW_KEY) as ViewMode) || "map"; }
+    catch { return "map"; }
+  });
+
+  useEffect(() => { try { localStorage.setItem(VIEW_KEY, view); } catch { /* ignore */ } }, [view]);
 
   const reload = () => {
     if (!token) return;
@@ -37,64 +47,114 @@ export function SitesHome() {
   };
   useEffect(reload, [token]);
 
-  return (
-    <div className="p-8">
-      <header className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">
-          Bienvenue {user?.full_name || user?.email?.split("@")[0]}
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Sélectionnez un site pour voir ses équipements et tableaux de bord.
-        </p>
-      </header>
+  // Stats globales : agrégat sur tous les sites pour la bande "vue d'ensemble".
+  const totals = useMemo(() => {
+    const t = { devices: 0, rules: 0, alarms: 0, widgets: 0 };
+    for (const id in summaries) {
+      const s = summaries[id];
+      t.devices += s.devices_total;
+      t.rules += s.rules_total;
+      t.alarms += s.alarms_total;
+      t.widgets += s.widgets_total;
+    }
+    return t;
+  }, [summaries]);
 
-      <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xs uppercase tracking-wider text-slate-500">Vos sites</h2>
-          {isAdmin && (
-            <button onClick={() => setCreating(true)}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-brand-500 hover:bg-brand-400 text-white">
-              <Plus className="h-3.5 w-3.5" /> Nouveau site
-            </button>
+  return (
+    <div className="min-h-full">
+      {/* Hero gradient avec blobs animés */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-indigo-500/10 via-cyan-500/5 to-emerald-500/10 dark:from-indigo-500/20 dark:via-cyan-500/10 dark:to-emerald-500/15 border-b border-slate-200 dark:border-slate-800">
+        <div className="zeina-blob absolute -top-32 -left-20 w-96 h-96 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="zeina-blob absolute -bottom-20 right-10 w-80 h-80 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none"
+          style={{ animationDelay: "6s" }} />
+        <div className="zeina-blob absolute top-10 right-1/3 w-72 h-72 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none"
+          style={{ animationDelay: "12s" }} />
+
+        <div className="relative px-8 pt-10 pb-8">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400 font-semibold mb-2">
+                Hyperviseur ZEINA
+              </p>
+              <h1 className="text-4xl lg:text-5xl font-bold tracking-tight bg-gradient-to-br from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+                Bonjour {user?.full_name?.split(" ")[0] || user?.email?.split("@")[0]}
+              </h1>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 max-w-xl">
+                Pilotez l'ensemble de vos sites depuis une vue unique. Cliquez sur un site pour accéder à ses tableaux de bord.
+              </p>
+            </div>
+
+            {isAdmin && (
+              <button onClick={() => setCreating(true)}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-br from-brand-500 to-cyan-500 hover:from-brand-400 hover:to-cyan-400 text-white text-sm font-medium shadow-lg shadow-brand-500/30 hover:shadow-xl hover:shadow-brand-500/40 transition">
+                <Plus className="h-4 w-4" /> Nouveau site
+              </button>
+            )}
+          </div>
+
+          {/* Bande de stats globales */}
+          {sites.length > 0 && (
+            <div className="mt-8 grid grid-cols-2 lg:grid-cols-4 gap-3 max-w-3xl">
+              <GlobalStat icon={<Building2 className="h-4 w-4" />} label="Sites"        value={sites.length}      color="indigo" />
+              <GlobalStat icon={<Cpu className="h-4 w-4" />}       label="Équipements" value={totals.devices}    color="cyan" />
+              <GlobalStat icon={<Sparkles className="h-4 w-4" />}  label="Règles"      value={totals.rules}      color="emerald" />
+              <GlobalStat icon={<Bell className="h-4 w-4" />}      label="Alarmes"     value={totals.alarms}     color={totals.alarms > 0 ? "rose" : "slate"} />
+            </div>
           )}
         </div>
+      </div>
 
+      <div className="p-8">
         {loading ? (
           <div className="text-sm text-slate-500 dark:text-slate-400">Chargement…</div>
         ) : sites.length === 0 ? (
           <EmptyState canCreate={isAdmin} onCreate={() => setCreating(true)} />
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {sites.map((s) => (
-              <SiteCard key={s.id} site={s} summary={summaries[s.id]}
-                canManage={isAdmin}
-                onEdit={() => setEditing(s)}
-                onDelete={async () => {
-                  const ok = await confirm({
-                    title: `Supprimer le site « ${s.name} » ?`,
-                    description: <>
-                      Cette action supprimera <strong>définitivement</strong> le site et l'intégralité de ses données :
-                      zones, équipements, règles, dashboards, alarmes, historique des mesures et affectations des utilisateurs.
-                      <br /><br />
-                      Cette action est <strong>irréversible</strong>.
-                    </>,
-                    danger: true,
-                    confirmLabel: "Supprimer définitivement",
-                    requireText: s.name,
-                  });
-                  if (!ok) return;
-                  try {
-                    await api.del(`/v1/sites/${s.id}`);
-                    reload();
-                    void refreshMe();
-                  } catch (e) {
-                    alert(e instanceof HttpError ? e.payload.message : String(e));
-                  }
-                }} />
-            ))}
-          </div>
+          <>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Vos sites</h2>
+              <div className="inline-flex items-center rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5">
+                <ViewToggle active={view === "map"} onClick={() => setView("map")} icon={<MapIcon className="h-3.5 w-3.5" />} label="Carte" />
+                <ViewToggle active={view === "grid"} onClick={() => setView("grid")} icon={<LayoutGrid className="h-3.5 w-3.5" />} label="Grille" />
+              </div>
+            </div>
+
+            {view === "map" ? (
+              <SitesGlobeMap sites={sites} summaries={summaries} />
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {sites.map((s) => (
+                  <SiteCard key={s.id} site={s} summary={summaries[s.id]}
+                    canManage={isAdmin}
+                    onEdit={() => setEditing(s)}
+                    onDelete={async () => {
+                      const ok = await confirm({
+                        title: `Supprimer le site « ${s.name} » ?`,
+                        description: <>
+                          Cette action supprimera <strong>définitivement</strong> le site et l'intégralité de ses données :
+                          zones, équipements, règles, dashboards, alarmes, historique des mesures et affectations des utilisateurs.
+                          <br /><br />
+                          Cette action est <strong>irréversible</strong>.
+                        </>,
+                        danger: true,
+                        confirmLabel: "Supprimer définitivement",
+                        requireText: s.name,
+                      });
+                      if (!ok) return;
+                      try {
+                        await api.del(`/v1/sites/${s.id}`);
+                        reload();
+                        void refreshMe();
+                      } catch (e) {
+                        alert(e instanceof HttpError ? e.payload.message : String(e));
+                      }
+                    }} />
+                ))}
+              </div>
+            )}
+          </>
         )}
-      </section>
+      </div>
 
       {creating && (
         <SiteFormModal mode="create"
@@ -106,6 +166,43 @@ export function SitesHome() {
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); reload(); void refreshMe(); }} />
       )}
+    </div>
+  );
+}
+
+function ViewToggle({ active, onClick, icon, label }: {
+  active: boolean; onClick: () => void; icon: React.ReactNode; label: string;
+}) {
+  return (
+    <button onClick={onClick}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition ${
+        active
+          ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-sm"
+          : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+      }`}>
+      {icon} {label}
+    </button>
+  );
+}
+
+function GlobalStat({ icon, label, value, color }: {
+  icon: React.ReactNode; label: string; value: number;
+  color: "indigo" | "cyan" | "emerald" | "rose" | "slate";
+}) {
+  const colorMap: Record<string, string> = {
+    indigo:  "from-indigo-500/20 to-indigo-500/5 text-indigo-600 dark:text-indigo-300 border-indigo-500/20",
+    cyan:    "from-cyan-500/20 to-cyan-500/5 text-cyan-600 dark:text-cyan-300 border-cyan-500/20",
+    emerald: "from-emerald-500/20 to-emerald-500/5 text-emerald-600 dark:text-emerald-300 border-emerald-500/20",
+    rose:    "from-rose-500/20 to-rose-500/5 text-rose-600 dark:text-rose-300 border-rose-500/30",
+    slate:   "from-slate-500/10 to-slate-500/5 text-slate-600 dark:text-slate-300 border-slate-500/20",
+  };
+  return (
+    <div className={`relative rounded-xl border bg-gradient-to-br ${colorMap[color]} backdrop-blur-sm px-4 py-3`}>
+      <div className="flex items-center gap-2">
+        {icon}
+        <span className="text-[11px] uppercase tracking-wider font-semibold opacity-80">{label}</span>
+      </div>
+      <div className="text-3xl font-bold tabular-nums mt-1 text-slate-900 dark:text-white">{value}</div>
     </div>
   );
 }
