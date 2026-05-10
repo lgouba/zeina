@@ -96,7 +96,7 @@ export function GaugeWidget({ widget }: { widget: Widget }) {
         aria-hidden
       />
 
-      <div className="relative flex items-center gap-2.5 min-w-0">
+      <div className="relative flex items-start gap-2.5 min-w-0">
         <div className={clsx("flex-shrink-0 rounded-lg p-2", meta.iconBg)}>
           <Icon className={clsx("h-4 w-4", meta.iconColor)} strokeWidth={2.2} />
         </div>
@@ -106,10 +106,12 @@ export function GaugeWidget({ widget }: { widget: Widget }) {
           </div>
         </div>
         {isLive && (
-          <span className="relative flex h-2 w-2 flex-shrink-0">
-            <span className={clsx("absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping", meta.liveDot)} />
-            <span className={clsx("relative inline-flex h-2 w-2 rounded-full", meta.liveDot)} />
-          </span>
+          <div className="flex-shrink-0 flex items-center gap-1.5">
+            <span className="relative flex h-2 w-2">
+              <span className={clsx("absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping", meta.liveDot)} />
+              <span className={clsx("relative inline-flex h-2 w-2 rounded-full", meta.liveDot)} />
+            </span>
+          </div>
         )}
       </div>
 
