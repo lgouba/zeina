@@ -38,6 +38,9 @@ type memberOut struct {
 	UserID      uuid.UUID          `json:"user_id"`
 	Email       string             `json:"email"`
 	FullName    *string            `json:"full_name,omitempty"`
+	FirstName   *string            `json:"first_name,omitempty"`
+	LastName    *string            `json:"last_name,omitempty"`
+	Phone       *string            `json:"phone,omitempty"`
 	RoleID      uuid.UUID          `json:"role_id"`
 	RoleName    string             `json:"role_name"`
 	Permissions rbac.PermissionSet `json:"permissions"`
@@ -52,7 +55,8 @@ func (h *SiteMembersHandler) List(c echo.Context) error {
 	tid, _ := uuid.Parse(callerClaims(c).TenantID)
 
 	const q = `
-		SELECT u.id, u.email, u.full_name, r.id, r.name, r.permissions, sm.added_at
+		SELECT u.id, u.email, u.full_name, u.first_name, u.last_name, u.phone,
+		       r.id, r.name, r.permissions, sm.added_at
 		FROM site_members sm
 		JOIN users u ON u.id = sm.user_id
 		JOIN roles r ON r.id = sm.role_id
@@ -69,7 +73,8 @@ func (h *SiteMembersHandler) List(c echo.Context) error {
 	for rows.Next() {
 		var m memberOut
 		var permsRaw []byte
-		if err := rows.Scan(&m.UserID, &m.Email, &m.FullName, &m.RoleID, &m.RoleName, &permsRaw, &m.AddedAt); err != nil {
+		if err := rows.Scan(&m.UserID, &m.Email, &m.FullName, &m.FirstName, &m.LastName, &m.Phone,
+			&m.RoleID, &m.RoleName, &permsRaw, &m.AddedAt); err != nil {
 			return apperr.Wrap(apperr.KindInternal, "scan member", err)
 		}
 		m.Permissions = rbac.ParsePermissions(permsRaw)

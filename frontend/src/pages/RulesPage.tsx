@@ -18,6 +18,7 @@ import type {
   RuleTrigger,
   Zone,
   DeviceListItem,
+  SiteMember,
 } from "../types/api";
 
 export function RulesPage() {
@@ -182,6 +183,11 @@ function GraphEditorContainer({
 }) {
   const [name, setName] = useState(editing?.name || initialName || "");
   const [enabled, setEnabled] = useState(editing?.enabled ?? true);
+  const [members, setMembers] = useState<SiteMember[]>([]);
+
+  useEffect(() => {
+    api.get<SiteMember[]>(`/v1/sites/${siteId}/members`).then(setMembers).catch(() => {});
+  }, [siteId]);
 
   // Si editing : essaye de charger le graph existant, sinon reconstruit depuis la definition.
   // Note : Rule type a definition_graph optionnel ajouté côté backend.
@@ -209,6 +215,7 @@ function GraphEditorContainer({
       initialDefinition={initialDef}
       devices={devices}
       zones={zones}
+      members={members}
       ruleName={name}
       ruleEnabled={enabled}
       onNameChange={setName}

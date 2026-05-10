@@ -29,7 +29,7 @@ import {
 import clsx from "clsx";
 import { useConfirm } from "./ConfirmDialog";
 import { api } from "../lib/api";
-import type { DeviceListItem, Zone, RuleDefinition, MeasurementMeta } from "../types/api";
+import type { DeviceListItem, Zone, RuleDefinition, MeasurementMeta, SiteMember } from "../types/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,6 +61,8 @@ interface Props {
   initialDefinition?: RuleDefinition; // legacy : reconstruction du graph depuis la définition
   devices: DeviceListItem[];
   zones: Zone[];
+  /** Membres du site — utilisés pour le picker des destinataires Email / SMS. */
+  members?: SiteMember[];
   onSubmit: (graph: GraphDoc) => Promise<void>;
   onCancel: () => void;
   ruleName: string;
@@ -104,7 +106,7 @@ export function RuleGraphEditor(props: Props) {
 }
 
 function RuleGraphEditorInner({
-  initial, initialDefinition, devices, zones, onSubmit, onCancel,
+  initial, initialDefinition, devices, zones, members = [], onSubmit, onCancel,
   ruleName, ruleEnabled, onNameChange, onEnabledChange,
 }: Props) {
   const confirm = useConfirm();
@@ -392,6 +394,7 @@ function RuleGraphEditorInner({
             edges={edges}
             devices={devices}
             zones={zones}
+            members={members}
             onChange={(patch) => updateNodeData(selectedNode.id, patch)}
             onDelete={() => removeNode(selectedNode.id)}
             onClose={() => setSelectedId(null)}
@@ -502,13 +505,14 @@ function ZeinaBlock({ data, selected }: NodeProps<Node<GraphNodeData & { _kind?:
 // ---------------------------------------------------------------------------
 
 function ConfigPanel({
-  node, nodes, edges, devices, zones, onChange, onDelete, onClose,
+  node, nodes, edges, devices, zones, members, onChange, onDelete, onClose,
 }: {
   node: Node<GraphNodeData>;
   nodes: Node<GraphNodeData>[];
   edges: Edge[];
   devices: DeviceListItem[];
   zones: Zone[];
+  members: SiteMember[];
   onChange: (patch: Partial<GraphNodeData>) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -548,8 +552,8 @@ function ConfigPanel({
         {kind === "trigger" && <TriggerForm data={data} devices={devices} zones={zones} onChange={onChange} />}
         {kind === "condition" && <ConditionForm data={data} upstreamEquipment={upstreamEquipment} onChange={onChange} />}
         {kind === "action_notify" && <NotifyForm data={data} onChange={onChange} />}
-        {kind === "action_email" && <EmailForm data={data} onChange={onChange} />}
-        {kind === "action_sms" && <SmsForm data={data} onChange={onChange} />}
+        {kind === "action_email" && <EmailForm data={data} members={members} onChange={onChange} />}
+        {kind === "action_sms" && <SmsForm data={data} members={members} onChange={onChange} />}
         {kind === "action_alarm" && <AlarmForm data={data} onChange={onChange} />}
         {kind === "action_webhook" && <WebhookForm data={data} onChange={onChange} />}
         {kind === "action_actuator" && <ActuatorForm data={data} devices={devices} onChange={onChange} />}
@@ -762,12 +766,16 @@ function NotifyForm({ data, onChange }: any) {
   );
 }
 
-function EmailForm({ data, onChange }: any) {
+function EmailForm({ data, members, onChange }: any) {
   return (
     <>
-      <Field label="Destinataires" hint="Séparés par des virgules">
-        <input value={(data.recipients || []).join(", ")} onChange={(e) => onChange({ recipients: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-          placeholder="alerts@example.com" className={inputCls} />
+      <Field label="Destinataires *" hint="Cochez les membres du site et/ou ajoutez des emails externes">
+        <RecipientPicker
+          kind="email"
+          members={members}
+          values={data.recipients || []}
+          onChange={(recipients) => onChange({ recipients })}
+        />
       </Field>
       <Field label="Objet">
         <input value={data.subject || ""} onChange={(e) => onChange({ subject: e.target.value })} className={inputCls} />
@@ -780,18 +788,145 @@ function EmailForm({ data, onChange }: any) {
   );
 }
 
-function SmsForm({ data, onChange }: any) {
+function SmsForm({ data, members, onChange }: any) {
   return (
     <>
-      <Field label="Numéros" hint="Format international, séparés par virgules">
-        <input value={(data.recipients || []).join(", ")} onChange={(e) => onChange({ recipients: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-          placeholder="+33612345678" className={inputCls} />
+      <Field label="Numéros *" hint="Cochez les membres du site et/ou ajoutez des numéros externes">
+        <RecipientPicker
+          kind="phone"
+          members={members}
+          values={data.recipients || []}
+          onChange={(recipients) => onChange({ recipients })}
+        />
       </Field>
       <Field label="Message">
-        <textarea value={data.message || ""} onChange={(e) => onChange({ message: e.target.value })} rows={3} maxLength={160} className={inputCls} />
+        <textarea value={data.message || ""} onChange={(e) => onChange({ message: e.target.value })}
+          rows={3} maxLength={160} className={inputCls} />
       </Field>
     </>
   );
+}
+
+// RecipientPicker — combo list de membres du site (avec leur email/phone)
+// + champ libre pour ajouter un destinataire externe.
+function RecipientPicker({
+  kind, members, values, onChange,
+}: {
+  kind: "email" | "phone";
+  members: SiteMember[];
+  values: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [extra, setExtra] = useState("");
+
+  // Index : valeur → SiteMember (si correspond à un membre)
+  const memberFor = (v: string) =>
+    members.find((m) => kind === "email" ? m.email === v : m.phone && m.phone === v);
+
+  function toggleMember(m: SiteMember) {
+    const v = kind === "email" ? m.email : m.phone || "";
+    if (!v) return;
+    if (values.includes(v)) onChange(values.filter((x) => x !== v));
+    else onChange([...values, v]);
+  }
+
+  function addExtra() {
+    const v = extra.trim();
+    if (!v) return;
+    if (!validate(v, kind)) return;
+    if (values.includes(v)) return;
+    onChange([...values, v]);
+    setExtra("");
+  }
+
+  function removeValue(v: string) {
+    onChange(values.filter((x) => x !== v));
+  }
+
+  return (
+    <div className="space-y-2">
+      {/* Liste des destinataires sélectionnés */}
+      {values.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {values.map((v) => {
+            const m = memberFor(v);
+            return (
+              <span key={v} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-brand-500/10 text-brand-700 dark:text-brand-300 border border-brand-500/30">
+                {m ? (m.full_name || m.email) : v}
+                <button onClick={() => removeValue(v)} className="hover:text-red-500">
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Membres du site (checkbox) */}
+      {members.length > 0 ? (
+        <div className="rounded-md border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 max-h-44 overflow-y-auto">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold px-2 py-1.5 border-b border-slate-200 dark:border-slate-800">
+            Membres du site
+          </div>
+          <div className="p-1">
+            {members.map((m) => {
+              const v = kind === "email" ? m.email : (m.phone || "");
+              const valid = v.length > 0;
+              const checked = valid && values.includes(v);
+              return (
+                <label key={m.user_id}
+                  className={clsx(
+                    "flex items-center gap-2 px-2 py-1.5 rounded text-xs",
+                    valid ? "cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800" : "opacity-50",
+                  )}>
+                  <input type="checkbox" disabled={!valid} checked={checked}
+                    onChange={() => toggleMember(m)} />
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-slate-700 dark:text-slate-200">
+                      {m.full_name || m.email}
+                    </div>
+                    <div className="truncate text-[10px] text-slate-500">
+                      {valid ? v : (kind === "phone" ? "Pas de téléphone renseigné" : m.email)}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="text-[11px] text-slate-400 italic px-2 py-1">
+          Aucun membre sur ce site — utilise le champ ci-dessous pour ajouter des destinataires externes.
+        </div>
+      )}
+
+      {/* Ajout libre (externe) */}
+      <div className="flex gap-1.5">
+        <input
+          value={extra}
+          onChange={(e) => setExtra(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addExtra(); } }}
+          placeholder={kind === "email" ? "alertes@externe.fr" : "+22670123456"}
+          className={`${inputCls} text-xs flex-1`}
+        />
+        <button type="button" onClick={addExtra}
+          disabled={!extra.trim() || !validate(extra.trim(), kind)}
+          className="px-2 py-1.5 text-xs rounded bg-brand-500 hover:bg-brand-400 text-white disabled:opacity-40">
+          <Plus className="h-3 w-3" />
+        </button>
+      </div>
+      {extra && !validate(extra.trim(), kind) && (
+        <div className="text-[10px] text-amber-600">
+          {kind === "email" ? "Format email invalide" : "Format téléphone invalide (ex: +33612345678)"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function validate(v: string, kind: "email" | "phone"): boolean {
+  if (kind === "email") return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  return /^\+?[0-9 .()-]{6,}$/.test(v);
 }
 
 function AlarmForm({ data, onChange }: any) {
