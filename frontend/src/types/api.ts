@@ -111,6 +111,8 @@ export interface Site {
   timezone: string;
 }
 
+// "floor" est conservé dans le type pour la rétrocompat des données existantes
+// en DB, mais n'est plus proposé dans l'UI de création.
 export type ZoneKind = "geographic" | "building_group" | "building" | "floor" | "room";
 
 export interface Zone {

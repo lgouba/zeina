@@ -44,11 +44,15 @@ const KIND_META: Record<ZoneKind, { label: string; description: string; icon: ty
   geographic:     { label: "Zone géographique", description: "Site, école, parc, campus…", icon: Globe2,    accent: "text-emerald-600 dark:text-emerald-300 bg-emerald-500/10" },
   building_group: { label: "Groupe de bâtiments", description: "Aile, secteur, regroupement",  icon: Building2, accent: "text-violet-600 dark:text-violet-300 bg-violet-500/10" },
   building:       { label: "Bâtiment",          description: "Bâtiment unique",                 icon: Building,  accent: "text-sky-600 dark:text-sky-300 bg-sky-500/10" },
+  // "floor" reste défini pour rétrocompat des données existantes en DB, mais
+  // n'apparaît plus dans le menu de création (cf. KIND_ORDER) ni dans la
+  // hiérarchie autorisée pour de nouvelles zones.
   floor:          { label: "Étage",             description: "Niveau dans un bâtiment",         icon: Layers,    accent: "text-amber-600 dark:text-amber-300 bg-amber-500/10" },
   room:           { label: "Pièce",             description: "Pièce, salle, atelier",           icon: DoorOpen,  accent: "text-orange-600 dark:text-orange-300 bg-orange-500/10" },
 };
 
-const KIND_ORDER: ZoneKind[] = ["geographic", "building_group", "building", "floor", "room"];
+// Ordre d'affichage dans les menus — "floor" retiré (non utilisé en pratique).
+const KIND_ORDER: ZoneKind[] = ["geographic", "building_group", "building", "room"];
 
 // ---------------------------------------------------------------------------
 // Règles de containment — synchronisées avec services/api/internal/handlers/
@@ -57,15 +61,15 @@ const KIND_ORDER: ZoneKind[] = ["geographic", "building_group", "building", "flo
 //   geographic     : root uniquement
 //   building_group : dans geographic
 //   building       : dans geographic ou building_group
-//   floor          : dans building uniquement
-//   room           : partout sauf dans une autre room
+//   room           : dans geographic, building_group ou building
+//   floor          : (legacy) dans building — pas proposé en création
 // ---------------------------------------------------------------------------
 const ALLOWED_PARENTS: Record<ZoneKind, (ZoneKind | null)[]> = {
   geographic:     [null],
   building_group: ["geographic"],
   building:       ["geographic", "building_group"],
-  floor:          ["building"],
-  room:           ["geographic", "building_group", "building", "floor"],
+  floor:          ["building"], // legacy
+  room:           ["geographic", "building_group", "building"],
 };
 
 function canHaveAsParent(child: ZoneKind, parent: ZoneKind | null): boolean {
@@ -617,8 +621,25 @@ function ZoneFormModal({ mode, siteId, zone, initialKind, initialParent, initial
   onSaved: () => void;
 }) {
   const [name, setName] = useState(zone?.name || "");
-  const [kind, setKind] = useState<ZoneKind>(zone?.kind || initialKind || "room");
-  const [parentID, setParentID] = useState<string | null>(zone?.parent_zone_id || initialParent?.id || null);
+  // Si on ouvre le modal en création avec un kind qui ne peut PAS être à la
+  // racine (ex: building) ET qu'aucun parent n'est passé en initial, on
+  // préselectionne automatiquement la première zone compatible existante du
+  // site comme parent. Sinon le useEffect plus bas forcerait le kind à
+  // "geographic" — ce qui n'est pas ce que l'utilisateur a choisi dans le
+  // menu Ajouter.
+  const requestedKind = zone?.kind || initialKind || "room";
+  const initialAutoParent = useMemo<Zone | null>(() => {
+    if (mode !== "create") return null;
+    if (initialParent) return null; // déjà fourni
+    if (canHaveAsParent(requestedKind, null)) return null; // peut être racine
+    const compatibleParentKinds = ALLOWED_PARENTS[requestedKind].filter((p): p is ZoneKind => p !== null);
+    return allZones.find((z) => compatibleParentKinds.includes(z.kind)) || null;
+  }, [mode, initialParent, requestedKind, allZones]);
+
+  const [kind, setKind] = useState<ZoneKind>(requestedKind);
+  const [parentID, setParentID] = useState<string | null>(
+    zone?.parent_zone_id || initialParent?.id || initialAutoParent?.id || null
+  );
   const [description, setDescription] = useState(zone?.description || "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
