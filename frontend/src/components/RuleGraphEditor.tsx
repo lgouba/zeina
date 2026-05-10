@@ -15,16 +15,18 @@
 // Sérialisation : compileGraph côté frontend produit { nodes, edges } envoyé
 // au backend qui le compile en RuleDefinition pour le moteur.
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef, createContext, useContext } from "react";
 import {
-  ReactFlow, ReactFlowProvider, Background, Controls, MiniMap,
-  Handle, Position, useNodesState, useEdgesState,
+  ReactFlow, ReactFlowProvider, Background, MiniMap,
+  Handle, Position, useNodesState, useEdgesState, useReactFlow,
   type Node, type Edge, type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
   Activity, Sparkles, Bell, Mail, MessageSquare, Webhook, ToggleRight, AlertCircle,
   Plus, Trash2, X, Check, Save, Cpu,
+  ZoomIn, ZoomOut, Maximize2, Minimize2, LayoutGrid, Eye, EyeOff,
+  PanelRightClose, PanelRightOpen, Crosshair,
 } from "lucide-react";
 import clsx from "clsx";
 import { useConfirm } from "./ConfirmDialog";
@@ -93,6 +95,10 @@ const NODE_META: Record<GraphNodeType, {
   action_actuator: { label: "Actionneur",      short: "Actionneur",icon: ToggleRight,    color: "emerald",  isAction: true  },
 };
 
+// Contexte pour propager l'état "afficher les détails" aux nœuds custom
+// sans avoir à muter node.data à chaque toggle.
+const DetailsContext = createContext<boolean>(true);
+
 // ---------------------------------------------------------------------------
 // Composant principal
 // ---------------------------------------------------------------------------
@@ -136,8 +142,79 @@ function RuleGraphEditorInner({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showConfig, setShowConfig] = useState(true);
+  const [showDetails, setShowDetails] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Suit l'état plein écran natif (échap, F11, etc.).
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      containerRef.current?.requestFullscreen().catch(() => {});
+    }
+  }, []);
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
+
+  // Auto-layout : positionne les blocs en colonnes (source / condition / actions).
+  const autoLayout = useCallback(() => {
+    setNodes((nds) => {
+      const COL_X = [80, 400, 760];
+      const ROW_GAP = 130;
+      const next = nds.map((n) => ({ ...n }));
+      const indexById = new Map(next.map((n, i) => [n.id, i]));
+
+      const sourceNode = next.find((n) => {
+        const k = (n.data as any)._kind;
+        return k === "equipment" || k === "trigger";
+      });
+      const conditionNode = next.find((n) => (n.data as any)._kind === "condition");
+      const actionNodes = next.filter((n) => NODE_META[(n.data as any)._kind as GraphNodeType]?.isAction);
+
+      if (sourceNode) {
+        next[indexById.get(sourceNode.id)!] = {
+          ...sourceNode, position: { x: COL_X[0], y: 240 },
+        };
+      }
+      if (conditionNode) {
+        next[indexById.get(conditionNode.id)!] = {
+          ...conditionNode, position: { x: COL_X[1], y: 240 },
+        };
+      }
+
+      // Sépare les actions par branche (true / false) selon leur edge entrante.
+      const trueBranch: typeof actionNodes = [];
+      const falseBranch: typeof actionNodes = [];
+      for (const a of actionNodes) {
+        const incoming = edges.find((e) => e.target === a.id);
+        if (incoming?.sourceHandle === "false") falseBranch.push(a);
+        else trueBranch.push(a);
+      }
+
+      const totalRows = trueBranch.length + falseBranch.length;
+      const totalH = (totalRows - 1) * ROW_GAP;
+      let y = 240 - totalH / 2;
+      for (const a of trueBranch) {
+        next[indexById.get(a.id)!] = { ...a, position: { x: COL_X[2], y } };
+        y += ROW_GAP;
+      }
+      // Petit espace entre branches
+      if (trueBranch.length && falseBranch.length) y += 20;
+      for (const a of falseBranch) {
+        next[indexById.get(a.id)!] = { ...a, position: { x: COL_X[2], y } };
+        y += ROW_GAP;
+      }
+      return next;
+    });
+  }, [edges, setNodes]);
 
   // Helpers d'ajout / suppression de nodes
   const addBlock = useCallback((type: GraphNodeType) => {
@@ -289,7 +366,7 @@ function RuleGraphEditorInner({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-50 dark:bg-slate-950 flex flex-col">
+    <div ref={containerRef} className="fixed inset-0 z-50 bg-slate-50 dark:bg-slate-950 flex flex-col">
       {/* Header */}
       <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
         <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -351,26 +428,38 @@ function RuleGraphEditorInner({
 
         {/* Canvas */}
         <div className="flex-1 relative min-w-0">
-          <ReactFlow
-            nodes={nodes} edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={(_, n) => setSelectedId(n.id)}
-            onPaneClick={() => setSelectedId(null)}
-            onEdgeClick={(_, e) => { if (e.sourceHandle) toggleEdgeBranch(e.id); }}
-            nodeTypes={NODE_TYPES}
-            fitView fitViewOptions={{ padding: 0.2 }}
-            proOptions={{ hideAttribution: true }}
-            minZoom={0.4} maxZoom={1.5}
-          >
-            <Background gap={16} color="#cbd5e1" />
-            <Controls position="top-right" />
-            <MiniMap pannable zoomable position="bottom-right"
-              nodeColor={(n) => {
-                const k = (n.data as any)._kind as GraphNodeType;
-                return tailwindToHex(NODE_META[k]?.color || "slate");
-              }} />
-          </ReactFlow>
+          <DetailsContext.Provider value={showDetails}>
+            <ReactFlow
+              nodes={nodes} edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={(_, n) => { setSelectedId(n.id); setShowConfig(true); }}
+              onPaneClick={() => setSelectedId(null)}
+              onEdgeClick={(_, e) => { if (e.sourceHandle) toggleEdgeBranch(e.id); }}
+              nodeTypes={NODE_TYPES}
+              fitView fitViewOptions={{ padding: 0.2 }}
+              proOptions={{ hideAttribution: true }}
+              minZoom={0.3} maxZoom={2}
+            >
+              <Background gap={16} color="#cbd5e1" />
+              <MiniMap pannable zoomable position="bottom-right"
+                nodeColor={(n) => {
+                  const k = (n.data as any)._kind as GraphNodeType;
+                  return tailwindToHex(NODE_META[k]?.color || "slate");
+                }} />
+            </ReactFlow>
+          </DetailsContext.Provider>
+
+          {/* Barre d'outils canvas (top-right) */}
+          <CanvasToolbar
+            showDetails={showDetails}
+            onToggleDetails={() => setShowDetails((v) => !v)}
+            onAutoLayout={autoLayout}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={toggleFullscreen}
+            showConfig={showConfig}
+            onToggleConfig={() => setShowConfig((v) => !v)}
+          />
 
           {/* Bandeau erreurs */}
           {validation.length > 0 && (
@@ -386,29 +475,38 @@ function RuleGraphEditorInner({
           )}
         </div>
 
-        {/* Panneau config */}
-        {selectedNode ? (
-          <ConfigPanel
-            node={selectedNode}
-            nodes={nodes}
-            edges={edges}
-            devices={devices}
-            zones={zones}
-            members={members}
-            onChange={(patch) => updateNodeData(selectedNode.id, patch)}
-            onDelete={() => removeNode(selectedNode.id)}
-            onClose={() => setSelectedId(null)}
-          />
-        ) : (
-          <aside className="w-80 shrink-0 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 text-sm text-slate-500 dark:text-slate-400">
-            <div className="text-[11px] uppercase tracking-wider font-semibold mb-2">Configuration</div>
-            <p>Sélectionnez un bloc pour le configurer, ou ajoutez-en un depuis la palette à gauche.</p>
-            <div className="mt-4 text-xs space-y-1">
-              <p className="font-medium text-slate-700 dark:text-slate-300">Astuce</p>
-              <p>Cliquez sur une flèche entre un Condition et une action pour basculer entre la branche <span className="text-emerald-600">vrai</span> et la branche <span className="text-red-500">faux</span>.</p>
-            </div>
-          </aside>
-        )}
+        {/* Panneau config (collapsable) */}
+        {showConfig ? (
+          selectedNode ? (
+            <ConfigPanel
+              node={selectedNode}
+              nodes={nodes}
+              edges={edges}
+              devices={devices}
+              zones={zones}
+              members={members}
+              onChange={(patch) => updateNodeData(selectedNode.id, patch)}
+              onDelete={() => removeNode(selectedNode.id)}
+              onClose={() => setSelectedId(null)}
+              onCollapse={() => setShowConfig(false)}
+            />
+          ) : (
+            <aside className="w-80 shrink-0 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 text-sm text-slate-500 dark:text-slate-400 relative">
+              <button
+                onClick={() => setShowConfig(false)}
+                title="Masquer le panneau"
+                className="absolute top-3 right-3 p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white">
+                <PanelRightClose className="h-4 w-4" />
+              </button>
+              <div className="text-[11px] uppercase tracking-wider font-semibold mb-2">Configuration</div>
+              <p>Sélectionnez un bloc pour le configurer, ou ajoutez-en un depuis la palette à gauche.</p>
+              <div className="mt-4 text-xs space-y-1">
+                <p className="font-medium text-slate-700 dark:text-slate-300">Astuce</p>
+                <p>Cliquez sur une flèche entre un Condition et une action pour basculer entre la branche <span className="text-emerald-600">vrai</span> et la branche <span className="text-red-500">faux</span>.</p>
+              </div>
+            </aside>
+          )
+        ) : null}
       </div>
 
       {error && (
@@ -418,6 +516,72 @@ function RuleGraphEditorInner({
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Toolbar canvas — zoom, layout, fullscreen, masquer config
+// ---------------------------------------------------------------------------
+
+function CanvasToolbar({
+  showDetails, onToggleDetails, onAutoLayout,
+  isFullscreen, onToggleFullscreen,
+  showConfig, onToggleConfig,
+}: {
+  showDetails: boolean;
+  onToggleDetails: () => void;
+  onAutoLayout: () => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  showConfig: boolean;
+  onToggleConfig: () => void;
+}) {
+  const rf = useReactFlow();
+  return (
+    <div className="absolute top-3 right-3 z-10 flex items-center gap-1 bg-white dark:bg-slate-900 rounded-lg shadow-md border border-slate-200 dark:border-slate-800 p-1">
+      <ToolbarBtn title={showDetails ? "Masquer les détails des blocs" : "Afficher les détails des blocs"}
+        onClick={onToggleDetails}>
+        {showDetails ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+      </ToolbarBtn>
+      <ToolbarBtn title="Repositionner les blocs automatiquement" onClick={onAutoLayout}>
+        <LayoutGrid className="h-4 w-4" />
+      </ToolbarBtn>
+      <Sep />
+      <ToolbarBtn title="Recentrer la vue"
+        onClick={() => rf.fitView({ padding: 0.2, duration: 300 })}>
+        <Crosshair className="h-4 w-4" />
+      </ToolbarBtn>
+      <ToolbarBtn title="Zoom +" onClick={() => rf.zoomIn({ duration: 200 })}>
+        <ZoomIn className="h-4 w-4" />
+      </ToolbarBtn>
+      <ToolbarBtn title="Zoom −" onClick={() => rf.zoomOut({ duration: 200 })}>
+        <ZoomOut className="h-4 w-4" />
+      </ToolbarBtn>
+      <Sep />
+      <ToolbarBtn title={showConfig ? "Masquer le panneau de configuration" : "Afficher le panneau de configuration"}
+        onClick={onToggleConfig}>
+        {showConfig ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+      </ToolbarBtn>
+      <ToolbarBtn title={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
+        onClick={onToggleFullscreen}>
+        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+      </ToolbarBtn>
+    </div>
+  );
+}
+
+function ToolbarBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className="p-1.5 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition">
+      {children}
+    </button>
+  );
+}
+
+function Sep() {
+  return <div className="w-px h-5 bg-slate-200 dark:bg-slate-800 mx-0.5" />;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +616,7 @@ const NODE_TYPES = { zeinaBlock: ZeinaBlock };
 function ZeinaBlock({ data, selected }: NodeProps<Node<GraphNodeData & { _kind?: GraphNodeType }>>) {
   const kind = data._kind as GraphNodeType;
   const m = NODE_META[kind];
+  const showDetails = useContext(DetailsContext);
   if (!m) return null;
   const Icon = m.icon;
   const summary = summarizeNode(kind, data);
@@ -461,7 +626,8 @@ function ZeinaBlock({ data, selected }: NodeProps<Node<GraphNodeData & { _kind?:
 
   return (
     <div className={clsx(
-      "rounded-xl border-2 bg-white dark:bg-slate-900 shadow-sm min-w-[200px] max-w-[260px] transition",
+      "rounded-xl border-2 bg-white dark:bg-slate-900 shadow-sm transition relative",
+      showDetails ? "min-w-[200px] max-w-[260px]" : "min-w-[150px] max-w-[180px]",
       selected
         ? `border-${m.color}-500 ring-2 ring-${m.color}-200 dark:ring-${m.color}-900/40`
         : "border-slate-200 dark:border-slate-800",
@@ -471,7 +637,10 @@ function ZeinaBlock({ data, selected }: NodeProps<Node<GraphNodeData & { _kind?:
         <Handle type="target" position={Position.Left} className="!bg-slate-400 !border-0 !w-2 !h-2" />
       )}
 
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+      <div className={clsx(
+        "flex items-center gap-2 px-3 py-2",
+        showDetails && "border-b border-slate-100 dark:border-slate-800",
+      )}>
         <span className={clsx("rounded p-1.5", colorBg(m.color))}>
           <Icon className={clsx("h-3.5 w-3.5", colorText(m.color))} />
         </span>
@@ -479,9 +648,11 @@ function ZeinaBlock({ data, selected }: NodeProps<Node<GraphNodeData & { _kind?:
           {m.short}
         </span>
       </div>
-      <div className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200 break-words">
-        {summary}
-      </div>
+      {showDetails && (
+        <div className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200 break-words">
+          {summary}
+        </div>
+      )}
 
       {/* Handles sortie : pour Condition, 2 handles (true/false) ; sinon 1 */}
       {isCondition ? (
@@ -505,7 +676,7 @@ function ZeinaBlock({ data, selected }: NodeProps<Node<GraphNodeData & { _kind?:
 // ---------------------------------------------------------------------------
 
 function ConfigPanel({
-  node, nodes, edges, devices, zones, members, onChange, onDelete, onClose,
+  node, nodes, edges, devices, zones, members, onChange, onDelete, onClose, onCollapse,
 }: {
   node: Node<GraphNodeData>;
   nodes: Node<GraphNodeData>[];
@@ -516,6 +687,7 @@ function ConfigPanel({
   onChange: (patch: Partial<GraphNodeData>) => void;
   onDelete: () => void;
   onClose: () => void;
+  onCollapse: () => void;
 }) {
   const kind = (node.data as any)._kind as GraphNodeType;
   const m = NODE_META[kind];
@@ -542,9 +714,16 @@ function ConfigPanel({
           </span>
           <span className="text-sm font-medium truncate">{m.label}</span>
         </div>
-        <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white">
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button onClick={onCollapse} title="Masquer le panneau"
+            className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white">
+            <PanelRightClose className="h-4 w-4" />
+          </button>
+          <button onClick={onClose} title="Désélectionner"
+            className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3 text-sm">
