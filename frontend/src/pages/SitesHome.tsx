@@ -120,7 +120,8 @@ export function SitesHome() {
             </div>
 
             {view === "map" ? (
-              <SitesGlobeMap sites={sites} summaries={summaries} />
+              <SitesGlobeMap sites={sites} summaries={summaries}
+                canGeocode={isAdmin} onGeocoded={reload} />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {sites.map((s) => (
@@ -382,17 +383,34 @@ function SiteFormModal({ mode, site, onClose, onSaved }: {
               </div>
             </Field>
           )}
-          <Field label="Adresse">
-            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Rue, ville, pays" className={inputCls} />
+          <Field label="Adresse" tooltip={
+            <p>L'adresse est utilisée pour positionner le site sur la carte globale.
+            Les coordonnées GPS sont calculées automatiquement à partir de l'adresse
+            (Base Adresse Nationale FR / OpenStreetMap).</p>
+          }>
+            <input value={address} onChange={(e) => setAddress(e.target.value)}
+              placeholder="ex: 12 rue de la République, 75001 Paris" className={inputCls} />
+            <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+              <MapPin className="h-3 w-3" />
+              Coordonnées GPS calculées automatiquement depuis l'adresse.
+            </div>
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Latitude">
-              <input value={lat} onChange={(e) => setLat(e.target.value)} type="number" step="any" placeholder="12.3714" className={inputCls} />
-            </Field>
-            <Field label="Longitude">
-              <input value={lng} onChange={(e) => setLng(e.target.value)} type="number" step="any" placeholder="-1.5197" className={inputCls} />
-            </Field>
-          </div>
+          <details className="text-xs">
+            <summary className="cursor-pointer text-slate-500 hover:text-slate-900 dark:hover:text-slate-300 select-none">
+              Saisir manuellement les coordonnées GPS (avancé)
+            </summary>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Latitude">
+                <input value={lat} onChange={(e) => setLat(e.target.value)} type="number" step="any" placeholder="12.3714" className={inputCls} />
+              </Field>
+              <Field label="Longitude">
+                <input value={lng} onChange={(e) => setLng(e.target.value)} type="number" step="any" placeholder="-1.5197" className={inputCls} />
+              </Field>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-2">
+              Renseigner ces champs forcera ces valeurs et désactivera le géocodage automatique.
+            </p>
+          </details>
           <Field label="Fuseau horaire">
             <input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Africa/Ouagadougou" className={inputCls} />
           </Field>

@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -12,16 +14,18 @@ import (
 	apperr "github.com/zeina/hyperviseur/packages/shared/errors"
 	"github.com/zeina/hyperviseur/packages/shared/jwt"
 	"github.com/zeina/hyperviseur/services/api/internal/audit"
+	"github.com/zeina/hyperviseur/services/api/internal/geocode"
 	mw "github.com/zeina/hyperviseur/services/api/internal/middleware"
 )
 
 type SitesHandler struct {
-	pool  *pgxpool.Pool
-	audit *audit.Logger
+	pool     *pgxpool.Pool
+	audit    *audit.Logger
+	geocoder *geocode.Geocoder
 }
 
 func NewSitesHandler(pool *pgxpool.Pool, log *audit.Logger) *SitesHandler {
-	return &SitesHandler{pool: pool, audit: log}
+	return &SitesHandler{pool: pool, audit: log, geocoder: geocode.New()}
 }
 
 func (h *SitesHandler) Register(g *echo.Group) {
@@ -36,6 +40,7 @@ func (h *SitesHandler) RegisterWrite(g *echo.Group) {
 	g.POST("/sites", h.Create)
 	g.PUT("/sites/:id", h.Update)
 	g.DELETE("/sites/:id", h.Delete)
+	g.POST("/sites/:id/geocode", h.Geocode)
 }
 
 type siteOut struct {
@@ -306,6 +311,19 @@ func (h *SitesHandler) Create(c echo.Context) error {
 	tid, _ := uuid.Parse(claims.TenantID)
 	uid, _ := uuid.Parse(claims.Subject)
 
+	// Auto-géocodage : si l'admin a saisi une adresse mais pas de coords,
+	// on les calcule via BAN + Nominatim. Best-effort : si ça échoue le site
+	// se crée quand même sans coords (sera affiché dans le panel "non
+	// géolocalisés" côté UI, géocodable a posteriori).
+	if (req.Lat == nil || req.Lng == nil) && req.Address != nil && strings.TrimSpace(*req.Address) != "" {
+		gctx, cancel := context.WithTimeout(c.Request().Context(), 4*time.Second)
+		if r, err := h.geocoder.Geocode(gctx, *req.Address); err == nil {
+			req.Lat = &r.Lat
+			req.Lng = &r.Lng
+		}
+		cancel()
+	}
+
 	tx, err := h.pool.BeginTx(c.Request().Context(), pgx.TxOptions{})
 	if err != nil {
 		return apperr.Wrap(apperr.KindInternal, "begin tx", err)
@@ -399,6 +417,17 @@ func (h *SitesHandler) Update(c echo.Context) error {
 		return apperr.Validation("invalid body")
 	}
 
+	// Auto-géocodage : si l'admin envoie une nouvelle adresse sans coords
+	// explicites, on tente de les calculer. Idem que Create.
+	if req.Lat == nil && req.Lng == nil && req.Address != nil && strings.TrimSpace(*req.Address) != "" {
+		gctx, cancel := context.WithTimeout(c.Request().Context(), 4*time.Second)
+		if r, err := h.geocoder.Geocode(gctx, *req.Address); err == nil {
+			req.Lat = &r.Lat
+			req.Lng = &r.Lng
+		}
+		cancel()
+	}
+
 	const q = `
 		UPDATE sites SET
 			name     = COALESCE($3, name),
@@ -420,6 +449,55 @@ func (h *SitesHandler) Update(c echo.Context) error {
 	uid, _ := uuid.Parse(callerClaims(c).Subject)
 	h.audit.Log(c.Request().Context(), audit.Event{
 		TenantID: tid, ActorID: &uid, Action: "site.update", TargetType: "site", TargetID: &s.ID, TargetName: s.Name,
+	})
+	return c.JSON(http.StatusOK, s)
+}
+
+// Geocode — résout les coordonnées GPS d'un site existant à partir de son
+// adresse. Utile pour les sites créés sans adresse / avant l'ajout de
+// l'auto-géocodage, ou quand le client a modifié l'adresse externe sans
+// passer par l'UI.
+//
+// Si le site n'a pas d'adresse renseignée, renvoie 422 (validation).
+// Si le géocodage échoue (BAN + Nominatim), renvoie 422 avec un message
+// explicite — le site reste inchangé.
+func (h *SitesHandler) Geocode(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return apperr.Validation("invalid site id")
+	}
+	tid := tenantID(c)
+
+	var address *string
+	if err := h.pool.QueryRow(c.Request().Context(),
+		`SELECT address FROM sites WHERE id = $1 AND tenant_id = $2`, id, tid).Scan(&address); err != nil {
+		return apperr.NotFound("site")
+	}
+	if address == nil || strings.TrimSpace(*address) == "" {
+		return apperr.Validation("le site n'a pas d'adresse — renseignez d'abord une adresse")
+	}
+
+	gctx, cancel := context.WithTimeout(c.Request().Context(), 6*time.Second)
+	defer cancel()
+	r, err := h.geocoder.Geocode(gctx, *address)
+	if err != nil {
+		return apperr.Validation("adresse introuvable — vérifiez son orthographe ou saisissez les coordonnées manuellement")
+	}
+
+	var s siteOut
+	if err := h.pool.QueryRow(c.Request().Context(),
+		`UPDATE sites SET lat = $3, lng = $4, updated_at = now()
+		 WHERE id = $1 AND tenant_id = $2
+		 RETURNING id, slug, name, address, lat, lng, timezone`,
+		id, tid, r.Lat, r.Lng,
+	).Scan(&s.ID, &s.Slug, &s.Name, &s.Address, &s.Lat, &s.Lng, &s.Timezone); err != nil {
+		return apperr.Wrap(apperr.KindInternal, "update site coords", err)
+	}
+
+	uid, _ := uuid.Parse(callerClaims(c).Subject)
+	h.audit.Log(c.Request().Context(), audit.Event{
+		TenantID: tid, ActorID: &uid, Action: "site.geocode", TargetType: "site", TargetID: &s.ID, TargetName: s.Name,
+		Metadata: map[string]any{"provider": r.Provider, "label": r.Label, "lat": r.Lat, "lng": r.Lng},
 	})
 	return c.JSON(http.StatusOK, s)
 }

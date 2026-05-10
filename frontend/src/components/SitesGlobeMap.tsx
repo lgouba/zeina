@@ -5,11 +5,13 @@
 // Tuiles CartoDB Voyager (clair) / Dark Matter (sombre) → rendu moderne sans
 // dépendance commerciale (souverain, libre).
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L, { type LatLngBoundsExpression, type LatLngTuple } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useNavigate } from "react-router-dom";
+import { MapPin, Loader2, AlertTriangle } from "lucide-react";
+import { api, HttpError } from "../lib/api";
 import { useTheme } from "../lib/theme";
 import type { Site, SiteSummary } from "../types/api";
 
@@ -18,9 +20,14 @@ interface Props {
   summaries: Record<string, SiteSummary>;
   /** Hauteur du conteneur. Défaut 480 px. */
   height?: number | string;
+  /** Si défini, autorise l'utilisateur à relancer le géocodage d'un site
+   *  sans coordonnées via le panel "Non géolocalisés". */
+  canGeocode?: boolean;
+  /** Callback déclenché après un géocodage réussi pour rafraîchir la liste. */
+  onGeocoded?: () => void;
 }
 
-export function SitesGlobeMap({ sites, summaries, height = 520 }: Props) {
+export function SitesGlobeMap({ sites, summaries, height = 520, canGeocode, onGeocoded }: Props) {
   const { theme } = useTheme();
   const navigate = useNavigate();
 
@@ -39,7 +46,13 @@ export function SitesGlobeMap({ sites, summaries, height = 520 }: Props) {
     return [avgLat, avgLng];
   }, [sites]);
 
+  const noCoordSites = useMemo(
+    () => sites.filter((s) => s.lat == null || s.lng == null),
+    [sites],
+  );
+
   return (
+    <>
     <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl">
       <MapContainer
         center={center}
@@ -83,10 +96,77 @@ export function SitesGlobeMap({ sites, summaries, height = 520 }: Props) {
         </div>
       </div>
 
-      {sites.some((s) => s.lat == null || s.lng == null) && (
-        <div className="absolute bottom-4 left-4 z-[400] bg-amber-500/90 backdrop-blur-md text-white text-xs px-3 py-2 rounded-lg shadow-lg max-w-xs pointer-events-none">
-          ⚠ Certains sites n'ont pas de coordonnées GPS et n'apparaissent pas sur la carte.
+    </div>
+
+    {noCoordSites.length > 0 && (
+      <NonGeolocatedPanel sites={noCoordSites} canGeocode={!!canGeocode} onGeocoded={onGeocoded} />
+    )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Panel "Non géolocalisés" — liste les sites sans coords + bouton géocoder
+// ---------------------------------------------------------------------------
+function NonGeolocatedPanel({ sites, canGeocode, onGeocoded }: {
+  sites: Site[]; canGeocode: boolean; onGeocoded?: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-950/20 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+        <span className="text-sm font-medium text-amber-900 dark:text-amber-200">
+          {sites.length} site{sites.length > 1 ? "s" : ""} non géolocalisé{sites.length > 1 ? "s" : ""}
+        </span>
+        <span className="text-xs text-amber-700/80 dark:text-amber-400/80">
+          — ils n'apparaissent pas sur la carte
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {sites.map((s) => (
+          <GeocodeRow key={s.id} site={s} canGeocode={canGeocode} onGeocoded={onGeocoded} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GeocodeRow({ site, canGeocode, onGeocoded }: {
+  site: Site; canGeocode: boolean; onGeocoded?: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function geocode() {
+    setLoading(true); setError(null);
+    try {
+      await api.post(`/v1/sites/${site.id}/geocode`, {});
+      onGeocoded?.();
+    } catch (e) {
+      setError(e instanceof HttpError ? e.payload.message : "Erreur");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 p-3 flex items-start gap-2">
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium truncate text-slate-900 dark:text-slate-100">{site.name}</div>
+        <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+          {site.address || <span className="italic">Aucune adresse renseignée</span>}
         </div>
+        {error && <div className="text-[11px] text-red-500 mt-1">{error}</div>}
+      </div>
+      {canGeocode && site.address && (
+        <button
+          onClick={geocode}
+          disabled={loading}
+          title="Calculer les coordonnées GPS à partir de l'adresse"
+          className="shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] rounded-md bg-amber-500 hover:bg-amber-400 text-white disabled:opacity-50">
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}
+          {loading ? "…" : "Géocoder"}
+        </button>
       )}
     </div>
   );
