@@ -63,95 +63,87 @@ export function SitesHome() {
   }, [summaries]);
 
   return (
-    <div className="min-h-full">
-      {/* Hero gradient avec blobs animés */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-indigo-500/10 via-cyan-500/5 to-emerald-500/10 dark:from-indigo-500/20 dark:via-cyan-500/10 dark:to-emerald-500/15 border-b border-slate-200 dark:border-slate-800">
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* Hero compact : titre + stats inline + bouton sur une seule ligne */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-indigo-500/10 via-cyan-500/5 to-emerald-500/10 dark:from-indigo-500/20 dark:via-cyan-500/10 dark:to-emerald-500/15 border-b border-slate-200 dark:border-slate-800 shrink-0">
         <div className="zeina-blob absolute -top-32 -left-20 w-96 h-96 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
         <div className="zeina-blob absolute -bottom-20 right-10 w-80 h-80 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none"
           style={{ animationDelay: "6s" }} />
-        <div className="zeina-blob absolute top-10 right-1/3 w-72 h-72 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none"
-          style={{ animationDelay: "12s" }} />
 
-        <div className="relative px-8 pt-6 pb-5">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400 font-semibold mb-1">
-                Hyperviseur ZEINA
-              </p>
-              <h1 className="text-2xl lg:text-3xl font-bold tracking-tight bg-gradient-to-br from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
-                Bonjour {user?.full_name?.split(" ")[0] || user?.email?.split("@")[0]}
-              </h1>
+        <div className="relative px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div className="min-w-0">
+            <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400 font-semibold leading-none mb-0.5">
+              Hyperviseur ZEINA
+            </p>
+            <h1 className="text-xl lg:text-2xl font-bold tracking-tight bg-gradient-to-br from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent leading-tight">
+              Bonjour {user?.full_name?.split(" ")[0] || user?.email?.split("@")[0]}
+            </h1>
+          </div>
+
+          {sites.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <GlobalStat icon={<Building2 className="h-3.5 w-3.5" />} label="Sites"        value={sites.length}      color="indigo" />
+              <GlobalStat icon={<Cpu className="h-3.5 w-3.5" />}       label="Équipements" value={totals.devices}    color="cyan" />
+              <GlobalStat icon={<Sparkles className="h-3.5 w-3.5" />}  label="Règles"      value={totals.rules}      color="emerald" />
+              <GlobalStat icon={<Bell className="h-3.5 w-3.5" />}      label="Alarmes"     value={totals.alarms}     color={totals.alarms > 0 ? "rose" : "slate"} />
             </div>
+          )}
 
+          <div className="ml-auto flex items-center gap-2">
+            <div className="inline-flex items-center rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5">
+              <ViewToggle active={view === "constellation"} onClick={() => setView("constellation")} icon={<Network className="h-3.5 w-3.5" />} label="Réseau" />
+              <ViewToggle active={view === "grid"} onClick={() => setView("grid")} icon={<LayoutGrid className="h-3.5 w-3.5" />} label="Grille" />
+            </div>
             {isAdmin && (
               <button onClick={() => setCreating(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-br from-brand-500 to-cyan-500 hover:from-brand-400 hover:to-cyan-400 text-white text-sm font-medium shadow-lg shadow-brand-500/30 hover:shadow-xl hover:shadow-brand-500/40 transition">
-                <Plus className="h-4 w-4" /> Nouveau site
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-gradient-to-br from-brand-500 to-cyan-500 hover:from-brand-400 hover:to-cyan-400 text-white text-sm font-medium shadow-lg shadow-brand-500/30 transition">
+                <Plus className="h-3.5 w-3.5" /> Nouveau site
               </button>
             )}
           </div>
-
-          {/* Bande de stats globales */}
-          {sites.length > 0 && (
-            <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-2 max-w-3xl">
-              <GlobalStat icon={<Building2 className="h-4 w-4" />} label="Sites"        value={sites.length}      color="indigo" />
-              <GlobalStat icon={<Cpu className="h-4 w-4" />}       label="Équipements" value={totals.devices}    color="cyan" />
-              <GlobalStat icon={<Sparkles className="h-4 w-4" />}  label="Règles"      value={totals.rules}      color="emerald" />
-              <GlobalStat icon={<Bell className="h-4 w-4" />}      label="Alarmes"     value={totals.alarms}     color={totals.alarms > 0 ? "rose" : "slate"} />
-            </div>
-          )}
         </div>
       </div>
 
-      <div className="px-8 pt-4 pb-8">
+      {/* Body : remplit l'espace restant exactement, sans scroll */}
+      <div className="flex-1 min-h-0 p-4">
         {loading ? (
           <div className="text-sm text-slate-500 dark:text-slate-400">Chargement…</div>
         ) : sites.length === 0 ? (
           <EmptyState canCreate={isAdmin} onCreate={() => setCreating(true)} />
+        ) : view === "constellation" ? (
+          <div className="h-full">
+            <SitesConstellation sites={sites} summaries={summaries} />
+          </div>
         ) : (
-          <>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Vos sites</h2>
-              <div className="inline-flex items-center rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5">
-                <ViewToggle active={view === "constellation"} onClick={() => setView("constellation")} icon={<Network className="h-3.5 w-3.5" />} label="Réseau" />
-                <ViewToggle active={view === "grid"} onClick={() => setView("grid")} icon={<LayoutGrid className="h-3.5 w-3.5" />} label="Grille" />
-              </div>
-            </div>
-
-            {view === "constellation" ? (
-              <SitesConstellation sites={sites} summaries={summaries} />
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {sites.map((s) => (
-                  <SiteCard key={s.id} site={s} summary={summaries[s.id]}
-                    canManage={isAdmin}
-                    onEdit={() => setEditing(s)}
-                    onDelete={async () => {
-                      const ok = await confirm({
-                        title: `Supprimer le site « ${s.name} » ?`,
-                        description: <>
-                          Cette action supprimera <strong>définitivement</strong> le site et l'intégralité de ses données :
-                          zones, équipements, règles, dashboards, alarmes, historique des mesures et affectations des utilisateurs.
-                          <br /><br />
-                          Cette action est <strong>irréversible</strong>.
-                        </>,
-                        danger: true,
-                        confirmLabel: "Supprimer définitivement",
-                        requireText: s.name,
-                      });
-                      if (!ok) return;
-                      try {
-                        await api.del(`/v1/sites/${s.id}`);
-                        reload();
-                        void refreshMe();
-                      } catch (e) {
-                        alert(e instanceof HttpError ? e.payload.message : String(e));
-                      }
-                    }} />
-                ))}
-              </div>
-            )}
-          </>
+          <div className="h-full overflow-auto grid gap-4 sm:grid-cols-2 lg:grid-cols-3 content-start">
+            {sites.map((s) => (
+              <SiteCard key={s.id} site={s} summary={summaries[s.id]}
+                canManage={isAdmin}
+                onEdit={() => setEditing(s)}
+                onDelete={async () => {
+                  const ok = await confirm({
+                    title: `Supprimer le site « ${s.name} » ?`,
+                    description: <>
+                      Cette action supprimera <strong>définitivement</strong> le site et l'intégralité de ses données :
+                      zones, équipements, règles, dashboards, alarmes, historique des mesures et affectations des utilisateurs.
+                      <br /><br />
+                      Cette action est <strong>irréversible</strong>.
+                    </>,
+                    danger: true,
+                    confirmLabel: "Supprimer définitivement",
+                    requireText: s.name,
+                  });
+                  if (!ok) return;
+                  try {
+                    await api.del(`/v1/sites/${s.id}`);
+                    reload();
+                    void refreshMe();
+                  } catch (e) {
+                    alert(e instanceof HttpError ? e.payload.message : String(e));
+                  }
+                }} />
+            ))}
+          </div>
         )}
       </div>
 

@@ -17,14 +17,12 @@ import type { Site, SiteSummary } from "../types/api";
 interface Props {
   sites: Site[];
   summaries: Record<string, SiteSummary>;
-  /** Hauteur du conteneur. Défaut 560 px. */
-  height?: number;
 }
 
-export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
+export function SitesConstellation({ sites, summaries }: Props) {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 1200, h: height });
+  const [size, setSize] = useState({ w: 1200, h: 600 });
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Suit la taille du container (largeur + hauteur) pour adapter le layout :
@@ -57,11 +55,23 @@ export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
   const positions = useMemo(() => computePositions(sites, size.w, size.h), [sites, size]);
   const stars = useMemo(() => generateStars(60, size.w, size.h), [size]);
 
+  // Taille adaptative des orbes en fonction de l'espace disponible et du
+  // nombre de sites. Plus il y a de sites, plus chaque orbe est petite —
+  // c'est ce qui permet à tout de tenir sur un écran sans scroll.
+  const orbSize = useMemo(() => {
+    const minDim = Math.min(size.w, size.h);
+    const base = minDim * 0.08;
+    // Décroissance douce selon N : 3 sites → orbes grandes ; 14 sites → petites.
+    const scale = Math.max(0.55, 1 - (sites.length - 3) * 0.05);
+    return Math.max(36, Math.min(72, base * scale));
+  }, [size, sites.length]);
+
+  const hubSize = useMemo(() => Math.max(50, Math.min(96, orbSize * 1.2)), [orbSize]);
+
   return (
     <div
       ref={containerRef}
-      className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl"
-      style={{ height }}
+      className="relative h-full w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl"
     >
       {/* Couche 1 : fond gradient sombre avec aurore */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_#1e293b_0%,_#020617_70%)]" />
@@ -114,14 +124,20 @@ export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
       <div className="absolute" style={{ left: size.w / 2, top: size.h / 2, transform: "translate(-50%, -50%)" }}>
         <div className="relative">
           <div className="absolute inset-0 bg-gradient-to-br from-cyan-400 to-indigo-500 rounded-full blur-2xl opacity-50 animate-pulse" />
-          <div className="relative w-20 h-20 bg-gradient-to-br from-slate-900 to-slate-800 border border-cyan-400/30 rounded-full flex items-center justify-center shadow-2xl">
+          <div
+            className="relative bg-gradient-to-br from-slate-900 to-slate-800 border border-cyan-400/30 rounded-full flex items-center justify-center shadow-2xl"
+            style={{ width: hubSize, height: hubSize }}
+          >
             <div className="absolute inset-1.5 rounded-full bg-gradient-to-br from-cyan-400/20 to-indigo-500/20" />
-            <span className="relative text-2xl font-bold bg-gradient-to-br from-cyan-300 to-indigo-300 bg-clip-text text-transparent tracking-tighter">
+            <span
+              className="relative font-bold bg-gradient-to-br from-cyan-300 to-indigo-300 bg-clip-text text-transparent tracking-tighter"
+              style={{ fontSize: hubSize * 0.4 }}
+            >
               Z
             </span>
           </div>
-          <div className="mt-2 text-center">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-300/80 font-semibold">
+          <div className="mt-1.5 text-center">
+            <div className="text-[9px] uppercase tracking-[0.2em] text-cyan-300/80 font-semibold">
               Hyperviseur
             </div>
           </div>
@@ -136,6 +152,7 @@ export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
           summary={summaries[p.site.id]}
           x={p.x}
           y={p.y}
+          orbSize={orbSize}
           onClick={() => navigate(`/sites/${p.site.id}/dashboards`)}
         />
       ))}
@@ -167,17 +184,20 @@ export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Orbe d'un site : glow + cercle + label en dessous
+// Orbe d'un site : glow + cercle + label en dessous. Taille adaptative.
 // ---------------------------------------------------------------------------
-function SiteOrb({ site, summary, x, y, onClick }: {
+function SiteOrb({ site, summary, x, y, orbSize, onClick }: {
   site: Site;
   summary?: SiteSummary;
   x: number;
   y: number;
+  orbSize: number;
   onClick: () => void;
 }) {
   const hasAlarm = (summary?.alarms_total || 0) > 0;
   const devices = summary?.devices_total || 0;
+  const iconSize = orbSize * 0.45;
+  const labelSize = orbSize < 48 ? "text-xs" : orbSize < 60 ? "text-[13px]" : "text-sm";
 
   return (
     <button
@@ -185,7 +205,7 @@ function SiteOrb({ site, summary, x, y, onClick }: {
       className="absolute group focus:outline-none"
       style={{ left: x, top: y, transform: "translate(-50%, -50%)" }}
     >
-      <div className="relative">
+      <div className="relative" style={{ width: orbSize, height: orbSize }}>
         {/* Halo de glow */}
         <div className={clsx(
           "absolute inset-0 rounded-full blur-2xl opacity-50 group-hover:opacity-90 transition",
@@ -199,12 +219,12 @@ function SiteOrb({ site, summary, x, y, onClick }: {
         )}
         {/* Orbe principale */}
         <div className={clsx(
-          "relative w-16 h-16 rounded-full flex items-center justify-center shadow-2xl ring-2 transition transform group-hover:scale-110",
+          "relative w-full h-full rounded-full flex items-center justify-center shadow-2xl ring-2 transition transform group-hover:scale-110",
           hasAlarm
             ? "bg-gradient-to-br from-red-500 to-orange-500 ring-red-300/30"
             : "bg-gradient-to-br from-cyan-400 to-indigo-500 ring-cyan-300/30",
         )}>
-          <Building2 className="h-7 w-7 text-white drop-shadow-lg" />
+          <Building2 className="text-white drop-shadow-lg" style={{ width: iconSize, height: iconSize }} />
           {devices > 0 && (
             <span className="absolute -bottom-1 -right-1 min-w-[20px] h-5 px-1.5 bg-slate-900 border border-cyan-400/40 rounded-full text-[10px] font-bold text-cyan-300 flex items-center justify-center tabular-nums">
               {devices}
@@ -213,12 +233,12 @@ function SiteOrb({ site, summary, x, y, onClick }: {
         </div>
       </div>
       {/* Label */}
-      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 whitespace-nowrap">
-        <div className="text-sm font-semibold text-white drop-shadow-lg group-hover:text-cyan-200 transition">
+      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 whitespace-nowrap">
+        <div className={clsx("font-semibold text-white drop-shadow-lg group-hover:text-cyan-200 transition", labelSize)}>
           {site.name}
         </div>
-        {summary && (
-          <div className="text-[11px] text-slate-400 mt-0.5 flex items-center justify-center gap-2">
+        {summary && orbSize >= 48 && (
+          <div className="text-[10px] text-slate-400 mt-0.5 flex items-center justify-center gap-2">
             <span>{summary.rules_total} règle{summary.rules_total > 1 ? "s" : ""}</span>
             {hasAlarm && (
               <span className="text-red-400 font-medium">· {summary.alarms_total} alarme{summary.alarms_total > 1 ? "s" : ""}</span>
@@ -237,7 +257,8 @@ function SiteOrb({ site, summary, x, y, onClick }: {
 function computePositions(sites: Site[], w: number, h: number) {
   const cx = w / 2;
   const cy = h / 2;
-  const usableR = Math.min(w, h) * 0.35;
+  // Marge pour que les labels sous les orbes ne soient pas tronqués.
+  const usableR = Math.min(w, h) * 0.36 - 30;
   const N = sites.length;
 
   if (N === 0) return [];
