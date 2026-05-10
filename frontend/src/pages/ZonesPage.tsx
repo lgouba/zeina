@@ -170,6 +170,73 @@ export function ZonesPage() {
     [tree, search, devicesByZone]
   );
 
+  // -----------------------------------------------------------------------
+  // Drag and drop : déplacer une zone (changer son parent) ou un équipement
+  // (changer sa zone) en glisser-déposer dans l'arbre.
+  // -----------------------------------------------------------------------
+  type Dragging =
+    | { type: "zone"; id: string; kind: ZoneKind; parentId: string | null }
+    | { type: "device"; id: string; zoneId: string };
+  const [dragging, setDragging] = useState<Dragging | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  // Pour chaque zone, l'ensemble de ses descendants (transitivité). Utilisé
+  // pour interdire de dropper une zone sur l'un de ses descendants (cycle).
+  const descendantsByZone = useMemo(() => {
+    const childrenByParent = new Map<string, string[]>();
+    for (const z of zones) {
+      if (z.parent_zone_id) {
+        const arr = childrenByParent.get(z.parent_zone_id) || [];
+        arr.push(z.id);
+        childrenByParent.set(z.parent_zone_id, arr);
+      }
+    }
+    const out = new Map<string, Set<string>>();
+    const walk = (id: string): Set<string> => {
+      if (out.has(id)) return out.get(id)!;
+      const set = new Set<string>();
+      for (const childID of childrenByParent.get(id) || []) {
+        set.add(childID);
+        for (const grand of walk(childID)) set.add(grand);
+      }
+      out.set(id, set);
+      return set;
+    };
+    for (const z of zones) walk(z.id);
+    return out;
+  }, [zones]);
+
+  function canDropOn(targetZone: Zone): boolean {
+    if (!dragging) return false;
+    if (dragging.type === "device") {
+      return dragging.zoneId !== targetZone.id; // devices : toute autre zone
+    }
+    // dragging.type === "zone"
+    if (dragging.id === targetZone.id) return false; // sur soi
+    if (dragging.parentId === targetZone.id) return false; // déjà là
+    if (descendantsByZone.get(dragging.id)?.has(targetZone.id)) return false; // cycle
+    return canHaveAsParent(dragging.kind, targetZone.kind); // hiérarchie
+  }
+
+  async function performDrop(targetZone: Zone) {
+    if (!dragging || !canDropOn(targetZone)) {
+      setDragging(null); setDragOverId(null);
+      return;
+    }
+    try {
+      if (dragging.type === "zone") {
+        await api.put(`/v1/zones/${dragging.id}`, { parent_zone_id: targetZone.id });
+      } else {
+        await api.put(`/v1/devices/${dragging.id}`, { zone_id: targetZone.id });
+      }
+      reload();
+    } catch (e) {
+      alert(e instanceof HttpError ? e.payload.message : String(e));
+    } finally {
+      setDragging(null); setDragOverId(null);
+    }
+  }
+
   const confirm = useConfirm();
   async function onDelete(z: Zone) {
     const ok = await confirm({
@@ -348,7 +415,15 @@ export function ZonesPage() {
               onEdit={setEditing}
               onDelete={onDelete}
               onDraw={(z) => { setView("map"); setDrawingZoneID(z.id); setPendingGeometry(null); }}
-              onOpenDevice={(d) => navigate(`/sites/${siteId}/devices/${d.id}`)} />
+              onOpenDevice={(d) => navigate(`/sites/${siteId}/devices/${d.id}`)}
+              dragging={dragging}
+              dragOverId={dragOverId}
+              onDragStartZone={(z) => setDragging({ type: "zone", id: z.id, kind: z.kind, parentId: z.parent_zone_id || null })}
+              onDragStartDevice={(d) => setDragging({ type: "device", id: d.id, zoneId: d.zone_id })}
+              onDragEnd={() => { setDragging(null); setDragOverId(null); }}
+              onDragOverZone={(z) => setDragOverId(z.id)}
+              onDropOnZone={performDrop}
+              canDropOn={canDropOn} />
           ))}
         </div>
       )}
@@ -445,7 +520,11 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-function ZoneNode({ node, depth, canWrite, devicesByZone, onAddChild, onAddDevice, onEdit, onDelete, onDraw, onOpenDevice }: {
+type DraggingState =
+  | { type: "zone"; id: string; kind: ZoneKind; parentId: string | null }
+  | { type: "device"; id: string; zoneId: string };
+
+interface ZoneNodeProps {
   node: TreeNode; depth: number; canWrite: boolean;
   devicesByZone: Map<string, DeviceListItem[]>;
   onAddChild: (parent: Zone, kind: ZoneKind) => void;
@@ -454,16 +533,69 @@ function ZoneNode({ node, depth, canWrite, devicesByZone, onAddChild, onAddDevic
   onDelete: (z: Zone) => void;
   onDraw: (z: Zone) => void;
   onOpenDevice: (d: DeviceListItem) => void;
-}) {
+  // Drag and drop
+  dragging: DraggingState | null;
+  dragOverId: string | null;
+  onDragStartZone: (z: Zone) => void;
+  onDragStartDevice: (d: DeviceListItem) => void;
+  onDragEnd: () => void;
+  onDragOverZone: (z: Zone) => void;
+  onDropOnZone: (target: Zone) => void;
+  canDropOn: (target: Zone) => boolean;
+}
+
+function ZoneNode(props: ZoneNodeProps) {
+  const {
+    node, depth, canWrite, devicesByZone,
+    onAddChild, onAddDevice, onEdit, onDelete, onDraw, onOpenDevice,
+    dragging, dragOverId,
+    onDragStartZone, onDragStartDevice, onDragEnd, onDragOverZone, onDropOnZone, canDropOn,
+  } = props;
   const [expanded, setExpanded] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const m = KIND_META[node.zone.kind];
   const zoneDevices = devicesByZone.get(node.zone.id) || [];
   const hasChildren = node.children.length > 0 || zoneDevices.length > 0;
 
+  const isBeingDragged = dragging?.type === "zone" && dragging.id === node.zone.id;
+  const isDropTarget = dragOverId === node.zone.id && !!dragging && dragging.type === "zone"
+    ? dragging.id !== node.zone.id
+    : dragOverId === node.zone.id && !!dragging;
+  const dropOK = isDropTarget && canDropOn(node.zone);
+  const dropKO = isDropTarget && !canDropOn(node.zone);
+
   return (
     <div>
-      <div className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800/50"
+      <div
+        draggable={canWrite}
+        onDragStart={(e) => {
+          if (!canWrite) return;
+          e.stopPropagation();
+          // dataTransfer obligatoire pour Firefox
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", `zone:${node.zone.id}`);
+          onDragStartZone(node.zone);
+        }}
+        onDragEnd={(e) => { e.stopPropagation(); onDragEnd(); }}
+        onDragOver={(e) => {
+          if (!dragging) return;
+          e.preventDefault(); // autorise le drop
+          e.stopPropagation();
+          if (dragOverId !== node.zone.id) onDragOverZone(node.zone);
+          e.dataTransfer.dropEffect = canDropOn(node.zone) ? "move" : "none";
+        }}
+        onDrop={(e) => {
+          e.preventDefault(); e.stopPropagation();
+          onDropOnZone(node.zone);
+        }}
+        className={clsx(
+          "group flex items-center gap-2 px-2 py-1.5 rounded-md transition",
+          !isBeingDragged && !isDropTarget && "hover:bg-slate-50 dark:hover:bg-slate-800/50",
+          isBeingDragged && "opacity-40",
+          dropOK && "ring-2 ring-brand-500 bg-brand-500/10",
+          dropKO && "ring-2 ring-red-500/40 bg-red-500/5 cursor-not-allowed",
+          canWrite && "cursor-grab active:cursor-grabbing",
+        )}
         style={{ paddingLeft: `${depth * 20 + 8}px` }}>
         <button
           onClick={() => setExpanded((e) => !e)}
@@ -566,10 +698,22 @@ function ZoneNode({ node, depth, canWrite, devicesByZone, onAddChild, onAddDevic
               devicesByZone={devicesByZone}
               onAddChild={onAddChild} onAddDevice={onAddDevice}
               onEdit={onEdit} onDelete={onDelete} onDraw={onDraw}
-              onOpenDevice={onOpenDevice} />
+              onOpenDevice={onOpenDevice}
+              dragging={dragging} dragOverId={dragOverId}
+              onDragStartZone={onDragStartZone}
+              onDragStartDevice={onDragStartDevice}
+              onDragEnd={onDragEnd}
+              onDragOverZone={onDragOverZone}
+              onDropOnZone={onDropOnZone}
+              canDropOn={canDropOn} />
           ))}
           {zoneDevices.map((d) => (
-            <DeviceLeaf key={d.id} device={d} depth={depth + 1} onOpen={() => onOpenDevice(d)} />
+            <DeviceLeaf key={d.id} device={d} depth={depth + 1}
+              onOpen={() => onOpenDevice(d)}
+              canWrite={canWrite}
+              isBeingDragged={dragging?.type === "device" && dragging.id === d.id}
+              onDragStart={() => onDragStartDevice(d)}
+              onDragEnd={onDragEnd} />
           ))}
         </div>
       )}
@@ -577,8 +721,12 @@ function ZoneNode({ node, depth, canWrite, devicesByZone, onAddChild, onAddDevic
   );
 }
 
-function DeviceLeaf({ device, depth, onOpen }: {
+function DeviceLeaf({ device, depth, onOpen, canWrite, isBeingDragged, onDragStart, onDragEnd }: {
   device: DeviceListItem; depth: number; onOpen: () => void;
+  canWrite: boolean;
+  isBeingDragged: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
 }) {
   const meta = DEVICE_TYPE_META[device.type] ?? DEVICE_TYPE_META.gateway;
   const Ic = meta.icon;
@@ -586,9 +734,25 @@ function DeviceLeaf({ device, depth, onOpen }: {
   return (
     <button
       onClick={onOpen}
-      className="group w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800/50 text-left"
+      draggable={canWrite}
+      onDragStart={(e) => {
+        if (!canWrite) return;
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", `device:${device.id}`);
+        onDragStart();
+      }}
+      onDragEnd={(e) => { e.stopPropagation(); onDragEnd(); }}
+      className={clsx(
+        "group w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition",
+        !isBeingDragged && "hover:bg-slate-50 dark:hover:bg-slate-800/50",
+        isBeingDragged && "opacity-40",
+        canWrite && "cursor-grab active:cursor-grabbing",
+      )}
       style={{ paddingLeft: `${depth * 20 + 8}px` }}
-      title={`Ouvrir la fiche de ${device.name || device.slug}`}>
+      title={canWrite
+        ? `Glisser-déposer pour changer de zone, ou cliquer pour ouvrir ${device.name || device.slug}`
+        : `Ouvrir la fiche de ${device.name || device.slug}`}>
       <span className="p-0.5 invisible"><ChevronRight className="h-3.5 w-3.5" /></span>
       <span className={clsx("rounded-md p-1.5 shrink-0", meta.accent)}>
         <Ic className="h-3.5 w-3.5" />

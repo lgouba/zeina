@@ -608,10 +608,11 @@ func (h *DevicesHandler) Create(c echo.Context) error {
 // --- Update / Delete -------------------------------------------------------
 
 type updateDeviceReq struct {
-	Name     *string `json:"name,omitempty"`
-	Model    *string `json:"model,omitempty"`
-	Category *string `json:"category,omitempty"`
-	Status   *string `json:"status,omitempty"` // 'online'|'offline'|'disabled'
+	Name     *string    `json:"name,omitempty"`
+	Model    *string    `json:"model,omitempty"`
+	Category *string    `json:"category,omitempty"`
+	Status   *string    `json:"status,omitempty"` // 'online'|'offline'|'disabled'
+	ZoneID   *uuid.UUID `json:"zone_id,omitempty"`
 }
 
 func (h *DevicesHandler) Update(c echo.Context) error {
@@ -625,7 +626,8 @@ func (h *DevicesHandler) Update(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	if _, err := h.ensureDeviceVisible(c, id); err != nil {
+	current, err := h.ensureDeviceVisible(c, id)
+	if err != nil {
 		return err
 	}
 
@@ -637,14 +639,39 @@ func (h *DevicesHandler) Update(c echo.Context) error {
 		}
 	}
 
+	// Si on déplace le device : vérifier que la zone cible existe et est dans
+	// le MÊME site (anti cross-site smuggling). Refuser aussi si une autre
+	// device avec le même slug existe déjà dans la zone cible (contrainte
+	// UNIQUE (zone_id, slug) en DB).
+	if req.ZoneID != nil && *req.ZoneID != current.ZoneID {
+		var targetSiteID uuid.UUID
+		tid := tenantID(c)
+		if err := h.pool.QueryRow(ctx, `
+			SELECT z.site_id FROM zones z
+			JOIN sites s ON s.id = z.site_id
+			WHERE z.id = $1 AND s.tenant_id = $2`, *req.ZoneID, tid).Scan(&targetSiteID); err != nil {
+			return apperr.Validation("zone cible introuvable dans ce tenant")
+		}
+		if targetSiteID != current.SiteID {
+			return apperr.Validation("impossible de déplacer un équipement vers un autre site")
+		}
+		var slugExists bool
+		if err := h.pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM devices WHERE zone_id = $1 AND slug = $2 AND id != $3)`,
+			*req.ZoneID, current.Slug, id).Scan(&slugExists); err == nil && slugExists {
+			return apperr.Validation("un équipement avec ce slug existe déjà dans la zone cible")
+		}
+	}
+
 	_, err = h.pool.Exec(ctx, `
 		UPDATE devices SET
 		  name     = COALESCE($2, name),
 		  model    = COALESCE($3, model),
 		  category = COALESCE($4, category),
 		  status   = COALESCE($5::device_status, status),
+		  zone_id  = COALESCE($6, zone_id),
 		  updated_at = now()
-		WHERE id = $1`, id, req.Name, req.Model, req.Category, req.Status)
+		WHERE id = $1`, id, req.Name, req.Model, req.Category, req.Status, req.ZoneID)
 	if err != nil {
 		return apperr.Wrap(apperr.KindInternal, "update device", err)
 	}
