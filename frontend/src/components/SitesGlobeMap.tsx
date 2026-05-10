@@ -10,7 +10,7 @@ import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L, { type LatLngBoundsExpression, type LatLngTuple } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Loader2, AlertTriangle } from "lucide-react";
+import { MapPin, Loader2, HelpCircle } from "lucide-react";
 import { api, HttpError } from "../lib/api";
 import { useTheme } from "../lib/theme";
 import type { Site, SiteSummary } from "../types/api";
@@ -81,8 +81,8 @@ export function SitesGlobeMap({ sites, summaries, height = 520, canGeocode, onGe
         <AutoFit sites={sites} />
       </MapContainer>
 
-      {/* Légende + compteur, overlay flottant */}
-      <div className="absolute top-4 left-4 z-[400] flex items-center gap-2 pointer-events-none">
+      {/* Compteur global — overlay flottant top-left */}
+      <div className="absolute top-4 left-4 z-[400] pointer-events-none">
         <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 shadow-lg">
           <div className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold">
             Vue globale
@@ -96,77 +96,100 @@ export function SitesGlobeMap({ sites, summaries, height = 520, canGeocode, onGe
         </div>
       </div>
 
+      {/* Sites sans coords — overlay flottant en bas, intégré à la carte */}
+      {noCoordSites.length > 0 && (
+        <FloatingNoCoordStack
+          sites={noCoordSites}
+          summaries={summaries}
+          canGeocode={!!canGeocode}
+          onGeocoded={onGeocoded}
+        />
+      )}
     </div>
-
-    {noCoordSites.length > 0 && (
-      <NonGeolocatedPanel sites={noCoordSites} canGeocode={!!canGeocode} onGeocoded={onGeocoded} />
-    )}
     </>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Panel "Non géolocalisés" — liste les sites sans coords + bouton géocoder
+// FloatingNoCoordStack — bandeau flottant en bas de la carte qui affiche
+// les sites sans coords sous forme de chips compactes. Cohérent visuellement
+// avec les pins de la carte : même look, même interactivité.
 // ---------------------------------------------------------------------------
-function NonGeolocatedPanel({ sites, canGeocode, onGeocoded }: {
-  sites: Site[]; canGeocode: boolean; onGeocoded?: () => void;
+function FloatingNoCoordStack({ sites, summaries, canGeocode, onGeocoded }: {
+  sites: Site[]; summaries: Record<string, SiteSummary>;
+  canGeocode: boolean; onGeocoded?: () => void;
 }) {
   return (
-    <div className="mt-4 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-950/20 p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-        <span className="text-sm font-medium text-amber-900 dark:text-amber-200">
-          {sites.length} site{sites.length > 1 ? "s" : ""} non géolocalisé{sites.length > 1 ? "s" : ""}
-        </span>
-        <span className="text-xs text-amber-700/80 dark:text-amber-400/80">
-          — ils n'apparaissent pas sur la carte
-        </span>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="absolute bottom-4 left-4 right-4 z-[400] flex justify-center">
+      <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 shadow-xl max-w-full flex items-center gap-2 overflow-x-auto">
+        <div className="shrink-0 flex items-center gap-1.5 pr-2 mr-1 border-r border-slate-200 dark:border-slate-700">
+          <HelpCircle className="h-3.5 w-3.5 text-slate-400" />
+          <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold whitespace-nowrap">
+            Sans coords
+          </span>
+        </div>
         {sites.map((s) => (
-          <GeocodeRow key={s.id} site={s} canGeocode={canGeocode} onGeocoded={onGeocoded} />
+          <NoCoordChip key={s.id} site={s} summary={summaries[s.id]}
+            canGeocode={canGeocode} onGeocoded={onGeocoded} />
         ))}
       </div>
     </div>
   );
 }
 
-function GeocodeRow({ site, canGeocode, onGeocoded }: {
-  site: Site; canGeocode: boolean; onGeocoded?: () => void;
+function NoCoordChip({ site, summary, canGeocode, onGeocoded }: {
+  site: Site; summary?: SiteSummary;
+  canGeocode: boolean; onGeocoded?: () => void;
 }) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const devices = summary?.devices_total || 0;
 
-  async function geocode() {
+  async function geocode(e: React.MouseEvent) {
+    e.stopPropagation();
     setLoading(true); setError(null);
     try {
       await api.post(`/v1/sites/${site.id}/geocode`, {});
       onGeocoded?.();
-    } catch (e) {
-      setError(e instanceof HttpError ? e.payload.message : "Erreur");
+    } catch (err) {
+      setError(err instanceof HttpError ? err.payload.message : "Erreur");
+      setTimeout(() => setError(null), 4000);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="rounded-lg bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 p-3 flex items-start gap-2">
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate text-slate-900 dark:text-slate-100">{site.name}</div>
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-          {site.address || <span className="italic">Aucune adresse renseignée</span>}
-        </div>
-        {error && <div className="text-[11px] text-red-500 mt-1">{error}</div>}
-      </div>
+    <div className="relative shrink-0 group">
+      <button
+        onClick={() => navigate(`/sites/${site.id}/dashboards`)}
+        title={site.address || "Aucune adresse renseignée"}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
+          bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700
+          text-slate-700 dark:text-slate-200 hover:from-brand-500 hover:to-cyan-500 hover:text-white
+          border border-dashed border-slate-300 dark:border-slate-600 hover:border-solid hover:border-transparent
+          transition shadow-sm whitespace-nowrap">
+        <span className="truncate max-w-[140px]">{site.name}</span>
+        {devices > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-300/60 dark:bg-slate-600/60 group-hover:bg-white/25 tabular-nums">
+            {devices}
+          </span>
+        )}
+      </button>
       {canGeocode && site.address && (
         <button
           onClick={geocode}
           disabled={loading}
           title="Calculer les coordonnées GPS à partir de l'adresse"
-          className="shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] rounded-md bg-amber-500 hover:bg-amber-400 text-white disabled:opacity-50">
-          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}
-          {loading ? "…" : "Géocoder"}
+          className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-amber-500 hover:bg-amber-400 text-white text-[10px] flex items-center justify-center shadow-md opacity-0 group-hover:opacity-100 transition disabled:opacity-50">
+          {loading ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <MapPin className="h-2.5 w-2.5" />}
         </button>
+      )}
+      {error && (
+        <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] px-2 py-1 rounded shadow-lg whitespace-nowrap">
+          {error}
+        </div>
       )}
     </div>
   );
