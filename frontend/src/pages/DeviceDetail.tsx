@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { api, HttpError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { MiniMeasurementWidget } from "../components/MiniMeasurementWidget";
+import { useConfirm } from "../components/ConfirmDialog";
 import type { Device, MeasurementMeta, Site } from "../types/api";
 
 interface ZoneRef {
@@ -69,9 +70,20 @@ export function DeviceDetail() {
     }
   }
 
+  const confirm = useConfirm();
   async function onDelete() {
     if (!device) return;
-    if (!confirm(`Supprimer définitivement l'équipement "${device.name || device.slug}" ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer l'équipement « ${device.name || device.slug} » ?`,
+      description: <>
+        L'équipement sera retiré du site avec ses widgets associés.
+        <br /><br />
+        L'historique des mesures reste en base et n'est pas effacé.
+      </>,
+      danger: true,
+      confirmLabel: "Supprimer l'équipement",
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/devices/${device.id}`);
       navigate(`/sites/${siteId}/devices`);

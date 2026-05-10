@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { api, HttpError } from "../lib/api";
 import { useAuth, useCanWrite } from "../lib/auth";
 import { CreateDeviceModal } from "../components/CreateDeviceModal";
+import { useConfirm } from "../components/ConfirmDialog";
 import type { DeviceListItem } from "../types/api";
 
 type ColumnKey = "name" | "zone" | "category" | "type" | "model" | "status" | "last_seen";
@@ -118,9 +119,20 @@ export function DevicesPage() {
     setSortKey("");
   }
 
+  const confirm = useConfirm();
   async function onDelete(e: React.MouseEvent, id: string, name: string) {
     e.stopPropagation();
-    if (!confirm(`Supprimer l'équipement "${name}" ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer l'équipement « ${name} » ?`,
+      description: <>
+        L'équipement sera retiré du site avec ses widgets associés (les graphiques pointant vers cet équipement deviendront vides).
+        <br /><br />
+        L'historique des mesures reste en base et n'est pas effacé.
+      </>,
+      danger: true,
+      confirmLabel: "Supprimer l'équipement",
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/devices/${id}`);
       reload();

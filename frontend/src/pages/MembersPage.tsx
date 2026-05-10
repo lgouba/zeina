@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { api, HttpError } from "../lib/api";
 import { useAuth, useCanWrite } from "../lib/auth";
 import { Help } from "../components/Tooltip";
+import { useConfirm } from "../components/ConfirmDialog";
 import type { Role, SiteMember, UserListItem } from "../types/api";
 
 const inputCls = "block w-full rounded-md bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-brand-500";
@@ -28,9 +29,20 @@ export function MembersPage() {
   };
   useEffect(reload, [siteId]);
 
+  const confirm = useConfirm();
   async function onRemove(m: SiteMember) {
     if (!siteId) return;
-    if (!confirm(`Retirer ${m.email} de ce site ?`)) return;
+    const ok = await confirm({
+      title: `Retirer ${m.full_name || m.email} du site ?`,
+      description: <>
+        Le compte <strong>{m.email}</strong> ne sera plus retiré du site mais reste actif sur la plateforme.
+        <br /><br />
+        Tu peux le ré-ajouter à tout moment depuis cette page.
+      </>,
+      warning: true,
+      confirmLabel: "Retirer du site",
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/sites/${siteId}/members/${m.user_id}`);
       reload();

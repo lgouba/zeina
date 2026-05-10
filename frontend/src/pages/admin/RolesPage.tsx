@@ -3,6 +3,7 @@ import { Plus, ShieldCheck, Trash2, Pencil, X, Lock, Building2 } from "lucide-re
 import clsx from "clsx";
 import { api, HttpError } from "../../lib/api";
 import { Help } from "../../components/Tooltip";
+import { useConfirm } from "../../components/ConfirmDialog";
 import type { FeatureMeta, PermissionLevel, PermissionSet, Role } from "../../types/api";
 
 const inputCls = "block w-full rounded-md bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-brand-500";
@@ -20,6 +21,7 @@ const LEVEL_DESC: Record<PermissionLevel, string> = {
 };
 
 export function RolesPage() {
+  const confirm = useConfirm();
   const [roles, setRoles] = useState<Role[]>([]);
   const [features, setFeatures] = useState<FeatureMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +43,17 @@ export function RolesPage() {
 
   async function onDelete(r: Role) {
     if (r.is_system) return;
-    if (!confirm(`Supprimer le rôle "${r.name}" ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer le rôle « ${r.name} » ?`,
+      description: <>
+        La suppression échouera si ce rôle est encore attribué à des membres de site.
+        Pour libérer un rôle utilisé, modifie d'abord l'affectation des utilisateurs concernés
+        depuis <strong>Membres du site</strong>.
+      </>,
+      danger: true,
+      confirmLabel: "Supprimer le rôle",
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/roles/${r.id}`);
       reload();

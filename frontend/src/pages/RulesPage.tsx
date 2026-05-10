@@ -15,6 +15,7 @@ import {
 } from "./ruleTemplates";
 import { CronBuilder, describeCron } from "../components/CronBuilder";
 import { Help } from "../components/Tooltip";
+import { useConfirm } from "../components/ConfirmDialog";
 import type {
   Rule, RuleAction, RuleCondition, RuleDefinition, RuleExecution, RuleTimeWindow,
   RuleTrigger, RuleZoneScope, AggregateOp,
@@ -60,8 +61,20 @@ export function RulesPage() {
       alert(e instanceof HttpError ? e.payload.message : String(e));
     }
   }
+  const confirm = useConfirm();
   async function onDelete(r: Rule) {
-    if (!confirm(`Supprimer la règle "${r.name}" ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer la règle « ${r.name} » ?`,
+      description: <>
+        La règle ne sera plus évaluée. Les <strong>alarmes déjà déclenchées</strong> par cette règle restent visibles
+        dans la page Alarmes pour l'historique.
+        <br /><br />
+        Si tu souhaites juste arrêter temporairement la règle, utilise le toggle <strong>Désactiver</strong> à la place.
+      </>,
+      danger: true,
+      confirmLabel: "Supprimer la règle",
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/rules/${r.id}`);
       reload();

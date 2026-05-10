@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api, HttpError } from "../lib/api";
+import { useConfirm } from "../components/ConfirmDialog";
 import { useCanWrite } from "../lib/auth";
 import { Help } from "../components/Tooltip";
 import { CreateDeviceModal } from "../components/CreateDeviceModal";
@@ -165,8 +166,18 @@ export function ZonesPage() {
     [tree, search, devicesByZone]
   );
 
+  const confirm = useConfirm();
   async function onDelete(z: Zone) {
-    if (!confirm(`Supprimer la zone "${z.name}" ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer la zone « ${z.name} » ?`,
+      description: <>
+        La zone ne peut être supprimée que si elle est <strong>vide</strong> (aucune sous-zone, aucun équipement).
+        Si ce n'est pas le cas, déplace ou supprime d'abord les éléments enfants.
+      </>,
+      danger: true,
+      confirmLabel: "Supprimer la zone",
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/zones/${z.id}`);
       reload();

@@ -4,6 +4,7 @@ import { Building2, MapPin, Plus, Pencil, Trash2, X, Cpu, Sparkles, Bell, Layout
 import { api, HttpError } from "../lib/api";
 import { useAuth, useIsTenantAdmin } from "../lib/auth";
 import { Help } from "../components/Tooltip";
+import { useConfirm } from "../components/ConfirmDialog";
 import type { Site, SiteSummary } from "../types/api";
 
 const inputCls = "block w-full rounded-md bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-brand-500";
@@ -11,6 +12,7 @@ const inputCls = "block w-full rounded-md bg-white dark:bg-slate-950 border bord
 export function SitesHome() {
   const { user, token, refreshMe } = useAuth();
   const isAdmin = useIsTenantAdmin();
+  const confirm = useConfirm();
   const [sites, setSites] = useState<Site[]>([]);
   const [summaries, setSummaries] = useState<Record<string, SiteSummary>>({});
   const [loading, setLoading] = useState(true);
@@ -68,7 +70,19 @@ export function SitesHome() {
                 canManage={isAdmin}
                 onEdit={() => setEditing(s)}
                 onDelete={async () => {
-                  if (!confirm(`Supprimer définitivement "${s.name}" et toutes ses données ?\nCette action est irréversible.`)) return;
+                  const ok = await confirm({
+                    title: `Supprimer le site « ${s.name} » ?`,
+                    description: <>
+                      Cette action supprimera <strong>définitivement</strong> le site et l'intégralité de ses données :
+                      zones, équipements, règles, dashboards, alarmes, historique des mesures et affectations des utilisateurs.
+                      <br /><br />
+                      Cette action est <strong>irréversible</strong>.
+                    </>,
+                    danger: true,
+                    confirmLabel: "Supprimer définitivement",
+                    requireText: s.name,
+                  });
+                  if (!ok) return;
                   try {
                     await api.del(`/v1/sites/${s.id}`);
                     reload();

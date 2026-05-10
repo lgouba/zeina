@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import { api, HttpError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { Help } from "../../components/Tooltip";
+import { Help, Tip } from "../../components/Tooltip";
+import { useConfirm } from "../../components/ConfirmDialog";
 import type { Role, Site, UserListItem, UserMembership } from "../../types/api";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,7 @@ const SITE_ALL = "__all__";
 
 export function UsersPage() {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -62,7 +64,18 @@ export function UsersPage() {
 
   async function onDelete(u: UserListItem) {
     if (u.id === user?.id) return;
-    if (!confirm(`Supprimer définitivement ${displayName(u)} (${u.email}) ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer ${displayName(u) || u.email} ?`,
+      description: <>
+        Le compte <strong>{u.email}</strong> sera supprimé définitivement, ainsi que toutes ses affectations sur les sites.
+        L'historique d'audit reste en place.
+        <br /><br />
+        Pour bloquer la connexion sans perdre le compte, utilise plutôt l'action <strong>Modifier → Statut → Désactivé</strong>.
+      </>,
+      danger: true,
+      confirmLabel: "Supprimer le compte",
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/users/${u.id}`);
       reload();
@@ -145,21 +158,27 @@ export function UsersPage() {
                       {u.status === "pending" ? (
                         <ResendActivationButton user={u} onSent={reload} />
                       ) : (
-                        <IconButton title="Envoyer un mail de réinitialisation" onClick={() => setResetting(u)}>
-                          <KeyRound className="h-4 w-4" />
-                        </IconButton>
+                        <Tip content="Envoyer un mail de réinitialisation du mot de passe">
+                          <IconButton title="" onClick={() => setResetting(u)}>
+                            <KeyRound className="h-4 w-4" />
+                          </IconButton>
+                        </Tip>
                       )}
-                      <IconButton title="Modifier" onClick={() => setEditing(u)}>
-                        <Pencil className="h-4 w-4" />
-                      </IconButton>
-                      <IconButton
-                        title="Supprimer"
-                        onClick={() => onDelete(u)}
-                        disabled={u.id === user?.id}
-                        danger
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </IconButton>
+                      <Tip content="Modifier l'utilisateur">
+                        <IconButton title="" onClick={() => setEditing(u)}>
+                          <Pencil className="h-4 w-4" />
+                        </IconButton>
+                      </Tip>
+                      <Tip content={u.id === user?.id ? "Vous ne pouvez pas vous supprimer vous-même" : "Supprimer définitivement le compte"}>
+                        <IconButton
+                          title=""
+                          onClick={() => onDelete(u)}
+                          disabled={u.id === user?.id}
+                          danger
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </IconButton>
+                      </Tip>
                     </div>
                   </td>
                 </tr>
@@ -252,11 +271,20 @@ function IconButton({
 }
 
 function ResendActivationButton({ user, onSent }: { user: UserListItem; onSent: () => void }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   async function send() {
     if (busy) return;
-    if (!confirm(`Renvoyer le code d'activation à ${user.email} ?`)) return;
+    const ok = await confirm({
+      title: "Renvoyer le code d'activation ?",
+      description: <>
+        Un nouveau code à 6 chiffres sera envoyé à <strong>{user.email}</strong>.
+        L'ancien code (s'il n'est pas encore utilisé) sera invalidé.
+      </>,
+      confirmLabel: "Envoyer le code",
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await api.post(`/v1/users/${user.id}/resend-activation`);
@@ -268,9 +296,11 @@ function ResendActivationButton({ user, onSent }: { user: UserListItem; onSent: 
     } finally { setBusy(false); }
   }
   return (
-    <IconButton title="Renvoyer le code d'activation par email" onClick={send} disabled={busy}>
-      {done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Send className="h-4 w-4" />}
-    </IconButton>
+    <Tip content="Renvoyer le code d'activation par email">
+      <IconButton title="" onClick={send} disabled={busy}>
+        {done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Send className="h-4 w-4" />}
+      </IconButton>
+    </Tip>
   );
 }
 

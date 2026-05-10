@@ -6,6 +6,7 @@ import { api, HttpError } from "../lib/api";
 import { useAuth, useCanWrite } from "../lib/auth";
 import { CreateWidgetModal } from "../components/CreateWidgetModal";
 import { DashboardGrid } from "../components/DashboardGrid";
+import { useConfirm } from "../components/ConfirmDialog";
 import type { DashboardDetail as TDashboard, Widget } from "../types/api";
 
 const LOCK_STORAGE_KEY = "zeina_dashboard_locked";
@@ -14,6 +15,7 @@ export function DashboardDetail() {
   const { did, id: siteId } = useParams<{ did: string; id: string }>();
   const { token } = useAuth();
   const canWrite = useCanWrite("dashboard");
+  const confirm = useConfirm();
   const ctx = useOutletContext<{ reloadDashboards: () => void }>();
   const [dash, setDash] = useState<TDashboard | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -41,7 +43,13 @@ export function DashboardDetail() {
   useEffect(reload, [did, token]);
 
   async function deleteWidget(w: Widget) {
-    if (!confirm(`Supprimer le widget "${w.title}" ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer le widget « ${w.title} » ?`,
+      description: <>Le widget sera retiré du tableau de bord. Les mesures historiques de l'équipement, elles, ne sont pas affectées.</>,
+      danger: true,
+      confirmLabel: "Supprimer",
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/widgets/${w.id}`);
       reload();
@@ -53,7 +61,17 @@ export function DashboardDetail() {
 
   async function deleteDashboard() {
     if (!dash) return;
-    if (!confirm(`Supprimer le tableau de bord "${dash.name}" et tous ses widgets ?`)) return;
+    const ok = await confirm({
+      title: `Supprimer le tableau de bord « ${dash.name} » ?`,
+      description: <>
+        Le tableau de bord et tous ses widgets seront supprimés.
+        Les mesures historiques restent en base — tu pourras recréer un tableau de bord à tout moment.
+      </>,
+      danger: true,
+      confirmLabel: "Supprimer le tableau de bord",
+      requireText: dash.name,
+    });
+    if (!ok) return;
     try {
       await api.del(`/v1/dashboards/${dash.id}`);
       ctx?.reloadDashboards();
