@@ -118,6 +118,27 @@ textarea.bg-slate-950, textarea.bg-slate-900, textarea.bg-slate-800 {
 .zeina-pin.alarm .zeina-pin-label {
   background: linear-gradient(135deg, #ef4444, #f97316);
 }
+.zeina-pin.approximate .zeina-pin-label {
+  background: linear-gradient(135deg, #64748b, #94a3b8);
+  border-style: dashed;
+  opacity: 0.85;
+}
+.zeina-pin.approximate .zeina-pin-tip {
+  border-top-color: #64748b;
+  opacity: 0.85;
+}
+.zeina-pin-approx {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
 .zeina-pin-name {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }

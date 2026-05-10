@@ -120,8 +120,7 @@ export function SitesHome() {
             </div>
 
             {view === "map" ? (
-              <SitesGlobeMap sites={sites} summaries={summaries}
-                canGeocode={isAdmin} onGeocoded={reload} />
+              <SitesGlobeMap sites={sites} summaries={summaries} />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {sites.map((s) => (
