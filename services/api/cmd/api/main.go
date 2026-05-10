@@ -152,7 +152,10 @@ func main() {
 
 	// --- Auth (public) -----------------------------------------------------
 	authH := handlers.NewAuthHandler(pool, signer, activationSvc, mailSvc, auditLog, *appBaseURL, *brandName, log)
-	authH.Register(v1.Group("/auth"))
+	// Rate limiter strict pour les endpoints sensibles : 10 tentatives par
+	// fenêtre de 15 min, par IP. Bloque le brute-force sur login + activation.
+	authRL := mw.NewAuthRateLimiter(10, 15*time.Minute)
+	authH.Register(v1.Group("/auth", authRL.Middleware()))
 
 	// --- WebSocket (auth via query param ?token=) --------------------------
 	wsH := handlers.NewWSHandler(signer, bcaster, allowedOrigins)

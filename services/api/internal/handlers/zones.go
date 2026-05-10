@@ -179,6 +179,15 @@ func (h *ZonesHandler) Create(c echo.Context) error {
 	if req.Slug == "" || req.Name == "" {
 		return apperr.Validation("slug and name are required")
 	}
+	if len(req.Name) > 200 {
+		return apperr.Validation("name too long (max 200 chars)")
+	}
+	if len(req.Slug) > 64 {
+		return apperr.Validation("slug too long (max 64 chars)")
+	}
+	if req.Description != nil && len(*req.Description) > 500 {
+		return apperr.Validation("description too long (max 500 chars)")
+	}
 	if !isSlugValid(req.Slug) {
 		return apperr.Validation("slug must contain only [a-z0-9-]")
 	}

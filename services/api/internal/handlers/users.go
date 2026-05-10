@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strings"
 	"time"
@@ -168,6 +169,11 @@ func (h *UsersHandler) Create(c echo.Context) error {
 	}
 	if req.IsSuperadmin && !caller.IsSuperadmin {
 		return apperr.Forbidden("only superadmin can create another superadmin")
+	}
+	// Sanitization + limites de taille (anti-DoS et anti-injection HTML dans
+	// les emails d'activation où ces champs sont rendus).
+	if err := sanitizeProfileFields(&req.FirstName, &req.LastName, &req.FullName, &req.JobTitle, &req.Phone); err != nil {
+		return apperr.Validation(err.Error())
 	}
 
 	tid, _ := uuid.Parse(caller.TenantID)
@@ -386,6 +392,9 @@ func (h *UsersHandler) Update(c echo.Context) error {
 		default:
 			return apperr.Validation("status must be pending, active or disabled")
 		}
+	}
+	if err := sanitizeProfileFields(&req.FirstName, &req.LastName, &req.FullName, &req.JobTitle, &req.Phone); err != nil {
+		return apperr.Validation(err.Error())
 	}
 
 	var targetTID uuid.UUID
@@ -616,13 +625,29 @@ func callerClaims(c echo.Context) *jwt.Claims {
 	return claims
 }
 
+// validEmail valide un email via net/mail.ParseAddress qui rejette
+// notamment les caractères de contrôle (CRLF — anti header injection dans
+// les mails d'activation), les adresses sans @, sans TLD, etc.
+//
+// Limites supplémentaires :
+//   - longueur 255 max (RFC 5321)
+//   - pas d'espaces (ParseAddress accepte "Foo Bar <a@b.c>" donc on filtre)
+//   - format simple "local@domain" sans display name
 func validEmail(s string) bool {
-	at := strings.IndexByte(s, '@')
-	if at <= 0 || at == len(s)-1 {
+	if len(s) == 0 || len(s) > 255 {
 		return false
 	}
-	dot := strings.LastIndexByte(s[at:], '.')
-	return dot > 0
+	if strings.ContainsAny(s, " \t\r\n") {
+		return false
+	}
+	addr, err := mail.ParseAddress(s)
+	if err != nil {
+		return false
+	}
+	// ParseAddress peut accepter "Name <a@b>" — on exige que le résultat
+	// recompose exactement la chaîne d'entrée.
+	return addr.Address == s && strings.Contains(addr.Address, "@") &&
+		!strings.HasPrefix(addr.Address, "@") && !strings.HasSuffix(addr.Address, "@")
 }
 
 // genTempPassword n'est plus utilisé par le flow normal, mais on le garde
@@ -639,3 +664,86 @@ func derefString(s *string) string {
 	}
 	return *s
 }
+
+// Limites de taille appliquées par sanitizeProfileFields. Volontairement
+// généreuses pour ne pas bloquer les noms étrangers ou composés, mais
+// suffisantes pour contrer un DoS via mégaoctet de string.
+const (
+	maxNameLen     = 100 // first_name, last_name
+	maxFullNameLen = 200
+	maxJobTitleLen = 120
+	maxPhoneLen    = 32
+)
+
+// sanitizeProfileFields applique trim + limite de taille + rejet des
+// caractères de contrôle (CRLF, NUL) sur les pointeurs de champs profil.
+// Les pointeurs peuvent être nil → no-op. Les chaînes vides après trim sont
+// remplacées par nil pour que le COALESCE SQL fonctionne correctement.
+func sanitizeProfileFields(first, last, full, job, phone **string) error {
+	if err := sanitizeOpt(first, maxNameLen, "first_name"); err != nil {
+		return err
+	}
+	if err := sanitizeOpt(last, maxNameLen, "last_name"); err != nil {
+		return err
+	}
+	if err := sanitizeOpt(full, maxFullNameLen, "full_name"); err != nil {
+		return err
+	}
+	if err := sanitizeOpt(job, maxJobTitleLen, "job_title"); err != nil {
+		return err
+	}
+	if err := sanitizeOpt(phone, maxPhoneLen, "phone"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func sanitizeOpt(p **string, maxLen int, field string) error {
+	if p == nil || *p == nil {
+		return nil
+	}
+	v := strings.TrimSpace(**p)
+	if v == "" {
+		*p = nil
+		return nil
+	}
+	if len(v) > maxLen {
+		return errInvalidField(field, "trop long (max "+itoa(maxLen)+" caractères)")
+	}
+	for _, r := range v {
+		if r < 0x20 && r != '\t' || r == 0x7f {
+			return errInvalidField(field, "contient un caractère de contrôle interdit")
+		}
+	}
+	*p = &v
+	return nil
+}
+
+// itoa : sans importer strconv juste pour ça (1 appel, marginal)
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		b[i] = '-'
+	}
+	return string(b[i:])
+}
+
+type fieldError struct{ field, msg string }
+
+func (e *fieldError) Error() string { return e.field + ": " + e.msg }
+
+func errInvalidField(field, msg string) error { return &fieldError{field: field, msg: msg} }

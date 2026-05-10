@@ -85,8 +85,9 @@ export function ActivationFlow({ purpose, title, intro }: Props) {
 
   async function submitPassword(e: FormEvent) {
     e.preventDefault();
-    if (password.length < 8) {
-      setError("Le mot de passe doit faire au moins 8 caractères.");
+    const pwdErr = validatePasswordClient(password);
+    if (pwdErr) {
+      setError(pwdErr);
       return;
     }
     if (password !== confirm) {
@@ -159,14 +160,14 @@ export function ActivationFlow({ purpose, title, intro }: Props) {
 
             <label className="block">
               <span className="text-xs text-slate-500 dark:text-slate-400">Nouveau mot de passe</span>
-              <input type="password" required minLength={8} value={password}
+              <input type="password" required minLength={10} value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="mt-1 block w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
-              <span className="mt-1 block text-[11px] text-slate-400">Minimum 8 caractères.</span>
+              <span className="mt-1 block text-[11px] text-slate-400">10 caractères min, au moins une lettre et un chiffre.</span>
             </label>
             <label className="block">
               <span className="text-xs text-slate-500 dark:text-slate-400">Confirmer</span>
-              <input type="password" required minLength={8} value={confirm}
+              <input type="password" required minLength={10} value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 className="mt-1 block w-full rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none" />
             </label>
@@ -190,4 +191,19 @@ export function ActivationFlow({ purpose, title, intro }: Props) {
 
 function ErrorBox({ msg }: { msg: string }) {
   return <div className="text-sm text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{msg}</div>;
+}
+
+// validatePasswordClient — miroir simplifié de la politique serveur.
+// Le serveur reste autorité ; ceci évite juste un round-trip pour les erreurs
+// évidentes côté UI.
+function validatePasswordClient(p: string): string | null {
+  if (p.length < 10) return "Le mot de passe doit faire au moins 10 caractères.";
+  if (p.length > 128) return "Le mot de passe est trop long (128 caractères max).";
+  if (p !== p.trim()) return "Pas d'espace au début ou à la fin.";
+  if (!/[a-zA-Z]/.test(p) || !/[0-9]/.test(p)) {
+    return "Le mot de passe doit contenir au moins une lettre et un chiffre.";
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(p)) return "Caractère de contrôle interdit.";
+  return null;
 }

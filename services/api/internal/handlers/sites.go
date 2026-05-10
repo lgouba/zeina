@@ -276,11 +276,30 @@ func (h *SitesHandler) Create(c echo.Context) error {
 	if req.Slug == "" || req.Name == "" {
 		return apperr.Validation("slug and name are required")
 	}
+	// Limites de taille (anti-DoS, anti injection HTML/MQTT topic).
+	if len(req.Name) > 200 {
+		return apperr.Validation("name too long (max 200 chars)")
+	}
+	if len(req.Slug) > 64 {
+		return apperr.Validation("slug too long (max 64 chars)")
+	}
+	if req.Address != nil && len(*req.Address) > 500 {
+		return apperr.Validation("address too long (max 500 chars)")
+	}
 	if !isSlugValid(req.Slug) {
 		return apperr.Validation("slug must contain only [a-z0-9-]")
 	}
+	if req.Lat != nil && (*req.Lat < -90 || *req.Lat > 90) {
+		return apperr.Validation("lat must be between -90 and 90")
+	}
+	if req.Lng != nil && (*req.Lng < -180 || *req.Lng > 180) {
+		return apperr.Validation("lng must be between -180 and 180")
+	}
 	tz := "Africa/Ouagadougou"
 	if req.Timezone != nil && *req.Timezone != "" {
+		if len(*req.Timezone) > 64 || strings.ContainsAny(*req.Timezone, "\r\n\t") {
+			return apperr.Validation("invalid timezone")
+		}
 		tz = *req.Timezone
 	}
 

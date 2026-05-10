@@ -84,16 +84,43 @@ func CORS(allowedOrigins []string) echo.MiddlewareFunc {
 	})
 }
 
-// SecureHeaders — équivalent helmet basique : HSTS, no-sniff, X-Frame-Options.
+// SecureHeaders — équivalent helmet : HSTS strict, no-sniff, anti-clickjack,
+// CSP restrictive, Referrer minimal, désactivation des Permissions-Policy
+// non utilisées (camera, geolocation, etc.).
 func SecureHeaders() echo.MiddlewareFunc {
-	return middleware.SecureWithConfig(middleware.SecureConfig{
+	secure := middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:         "1; mode=block",
 		ContentTypeNosniff:    "nosniff",
 		XFrameOptions:         "DENY",
 		HSTSMaxAge:            31536000,
 		HSTSExcludeSubdomains: false,
-		ContentSecurityPolicy: "default-src 'self'",
+		// CSP minimale pour l'API : pas d'inline JS/CSS, pas de eval, pas de
+		// ressources externes (les seules réponses HTML sont Swagger UI servi
+		// depuis CDN unpkg, qui a sa propre CSP plus tolérante côté handler
+		// /docs).
+		ContentSecurityPolicy: "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 	})
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return secure(func(c echo.Context) error {
+			h := c.Response().Header()
+			// Plus restrictif que les défauts Echo
+			if h.Get("Referrer-Policy") == "" {
+				h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			}
+			if h.Get("Permissions-Policy") == "" {
+				h.Set("Permissions-Policy",
+					"camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+			}
+			// Cross-Origin protections (anti SXSS via fetch/iframe)
+			if h.Get("Cross-Origin-Opener-Policy") == "" {
+				h.Set("Cross-Origin-Opener-Policy", "same-origin")
+			}
+			if h.Get("Cross-Origin-Resource-Policy") == "" {
+				h.Set("Cross-Origin-Resource-Policy", "same-site")
+			}
+			return next(c)
+		})
+	}
 }
 
 // --- Rate limiter en mémoire (token bucket par IP) -------------------------
@@ -152,6 +179,76 @@ func (rl *RateLimiter) allow(key string) bool {
 		return false
 	}
 	b.tokens--
+	return true
+}
+
+// --- Rate limiter strict pour les endpoints sensibles ---------------------
+//
+// AuthRateLimiter est un compteur sur fenêtre fixe (par IP) destiné aux
+// endpoints d'authentification : login, verify-code, forgot-password,
+// set-password. Il vise à ralentir le brute-force au-delà du rate limiter
+// global (qui autorise des bursts pour l'usage normal de l'app).
+//
+// Politique par défaut : MaxAttempts requêtes par Window.
+// Au-delà, 429 jusqu'à la fin de la fenêtre.
+//
+// Stockage en mémoire (per-process). Pour multi-replica, migrer vers Redis.
+
+type authBucket struct {
+	count   int
+	windowAt time.Time
+}
+
+type AuthRateLimiter struct {
+	mu          sync.Mutex
+	buckets     map[string]*authBucket
+	maxAttempts int
+	window      time.Duration
+}
+
+// NewAuthRateLimiter crée un limiter strict. Suggestion : 10 tentatives /
+// 15 min ralentit drastiquement le brute-force tout en restant tolérant
+// pour un humain qui se trompe quelques fois.
+func NewAuthRateLimiter(maxAttempts int, window time.Duration) *AuthRateLimiter {
+	if maxAttempts <= 0 {
+		maxAttempts = 10
+	}
+	if window <= 0 {
+		window = 15 * time.Minute
+	}
+	return &AuthRateLimiter{
+		buckets:     make(map[string]*authBucket),
+		maxAttempts: maxAttempts,
+		window:      window,
+	}
+}
+
+// Middleware rejette les requêtes au-delà du quota pour l'IP courante.
+func (rl *AuthRateLimiter) Middleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if !rl.allow(c.RealIP()) {
+				return apperr.New(apperr.KindRateLimited,
+					"trop de tentatives — réessayez dans quelques minutes")
+			}
+			return next(c)
+		}
+	}
+}
+
+func (rl *AuthRateLimiter) allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	b, ok := rl.buckets[key]
+	if !ok || now.Sub(b.windowAt) >= rl.window {
+		rl.buckets[key] = &authBucket{count: 1, windowAt: now}
+		return true
+	}
+	if b.count >= rl.maxAttempts {
+		return false
+	}
+	b.count++
 	return true
 }
 

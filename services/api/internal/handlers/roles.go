@@ -149,6 +149,12 @@ func (h *RolesHandler) Create(c echo.Context) error {
 	if req.Name == "" {
 		return apperr.Validation("name required")
 	}
+	if len(req.Name) > 100 {
+		return apperr.Validation("name too long (max 100 chars)")
+	}
+	if req.Description != nil && len(*req.Description) > 500 {
+		return apperr.Validation("description too long (max 500 chars)")
+	}
 	if err := validatePermissions(req.Permissions); err != nil {
 		return apperr.Validation(err.Error())
 	}

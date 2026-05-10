@@ -517,13 +517,36 @@ func (h *AuthHandler) ForgotPassword(c echo.Context) error {
 	return c.JSON(http.StatusOK, forgotPasswordResp{Sent: true})
 }
 
-// validatePassword : règles minimales pour un MVP. À durcir plus tard.
+// validatePassword applique une politique minimale :
+//   - 10 caractères minimum (NIST recommande 8 mais on prend 10)
+//   - 128 caractères maximum (au-delà : risque DoS sur bcrypt)
+//   - au moins 1 lettre ET au moins 1 chiffre (anti "azertyuiop" et "1234567890")
+//   - pas d'espaces aux bords
+//   - pas de caractères de contrôle (anti CRLF, NUL, etc.)
 func validatePassword(p string) error {
-	if len(p) < 8 {
-		return errors.New("password must be at least 8 characters")
+	if len(p) < 10 {
+		return errors.New("le mot de passe doit faire au moins 10 caractères")
 	}
-	if len(p) > 256 {
-		return errors.New("password too long")
+	if len(p) > 128 {
+		return errors.New("le mot de passe est trop long (max 128 caractères)")
+	}
+	if p != strings.TrimSpace(p) {
+		return errors.New("le mot de passe ne peut commencer ou finir par un espace")
+	}
+	var hasLetter, hasDigit bool
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("le mot de passe contient un caractère de contrôle interdit")
+		}
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			hasLetter = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		}
+	}
+	if !hasLetter || !hasDigit {
+		return errors.New("le mot de passe doit contenir au moins une lettre et un chiffre")
 	}
 	return nil
 }
