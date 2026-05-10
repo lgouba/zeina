@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Building2, MapPin, Plus, Pencil, Trash2, X, Cpu, Sparkles, Bell, LayoutDashboard, Map as MapIcon, LayoutGrid } from "lucide-react";
+import { Building2, Plus, Pencil, Trash2, X, Cpu, Sparkles, Bell, LayoutDashboard, Network, LayoutGrid } from "lucide-react";
 import { api, HttpError } from "../lib/api";
 import { useAuth, useIsTenantAdmin } from "../lib/auth";
 import { Help } from "../components/Tooltip";
 import { useConfirm } from "../components/ConfirmDialog";
-import { SitesGlobeMap } from "../components/SitesGlobeMap";
+import { SitesConstellation } from "../components/SitesConstellation";
 import type { Site, SiteSummary } from "../types/api";
 
 const inputCls = "block w-full rounded-md bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm focus:outline-none focus:border-brand-500";
 
-type ViewMode = "map" | "grid";
+type ViewMode = "constellation" | "grid";
 const VIEW_KEY = "zeina_sites_view";
 
 export function SitesHome() {
@@ -23,8 +23,10 @@ export function SitesHome() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Site | null>(null);
   const [view, setView] = useState<ViewMode>(() => {
-    try { return (localStorage.getItem(VIEW_KEY) as ViewMode) || "map"; }
-    catch { return "map"; }
+    try {
+      const v = localStorage.getItem(VIEW_KEY) as ViewMode | null;
+      return v === "grid" ? "grid" : "constellation";
+    } catch { return "constellation"; }
   });
 
   useEffect(() => { try { localStorage.setItem(VIEW_KEY, view); } catch { /* ignore */ } }, [view]);
@@ -114,13 +116,13 @@ export function SitesHome() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Vos sites</h2>
               <div className="inline-flex items-center rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5">
-                <ViewToggle active={view === "map"} onClick={() => setView("map")} icon={<MapIcon className="h-3.5 w-3.5" />} label="Carte" />
+                <ViewToggle active={view === "constellation"} onClick={() => setView("constellation")} icon={<Network className="h-3.5 w-3.5" />} label="Réseau" />
                 <ViewToggle active={view === "grid"} onClick={() => setView("grid")} icon={<LayoutGrid className="h-3.5 w-3.5" />} label="Grille" />
               </div>
             </div>
 
-            {view === "map" ? (
-              <SitesGlobeMap sites={sites} summaries={summaries} />
+            {view === "constellation" ? (
+              <SitesConstellation sites={sites} summaries={summaries} />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {sites.map((s) => (
@@ -253,10 +255,7 @@ function SiteCard({ site, summary, canManage, onEdit, onDelete }: {
           </div>
           <div className="flex-1 min-w-0">
             <div className="font-medium truncate text-slate-900 dark:text-slate-100">{site.name}</div>
-            <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5 truncate">
-              <MapPin className="h-3 w-3 shrink-0" />
-              <span className="truncate">{site.address || site.slug}</span>
-            </div>
+            <div className="text-xs text-slate-500 mt-0.5 truncate font-mono">{site.slug}</div>
           </div>
         </div>
         {summary && (
@@ -293,9 +292,6 @@ function SiteFormModal({ mode, site, onClose, onSaved }: {
 }) {
   const [slug, setSlug] = useState(site?.slug || "");
   const [name, setName] = useState(site?.name || "");
-  const [address, setAddress] = useState(site?.address || "");
-  const [lat, setLat] = useState(site?.lat?.toString() || "");
-  const [lng, setLng] = useState(site?.lng?.toString() || "");
   const [timezone, setTimezone] = useState(site?.timezone || "Africa/Ouagadougou");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -321,9 +317,6 @@ function SiteFormModal({ mode, site, onClose, onSaved }: {
     setSubmitting(true);
     const body: Record<string, unknown> = {
       name: name.trim(),
-      address: address.trim() || null,
-      lat: lat ? Number(lat) : null,
-      lng: lng ? Number(lng) : null,
       timezone: timezone || "Africa/Ouagadougou",
     };
     if (mode === "create") {
@@ -382,34 +375,6 @@ function SiteFormModal({ mode, site, onClose, onSaved }: {
               </div>
             </Field>
           )}
-          <Field label="Adresse" tooltip={
-            <p>L'adresse est utilisée pour positionner le site sur la carte globale.
-            Les coordonnées GPS sont calculées automatiquement à partir de l'adresse
-            (Base Adresse Nationale FR / OpenStreetMap).</p>
-          }>
-            <input value={address} onChange={(e) => setAddress(e.target.value)}
-              placeholder="ex: 12 rue de la République, 75001 Paris" className={inputCls} />
-            <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
-              <MapPin className="h-3 w-3" />
-              Coordonnées GPS calculées automatiquement depuis l'adresse.
-            </div>
-          </Field>
-          <details className="text-xs">
-            <summary className="cursor-pointer text-slate-500 hover:text-slate-900 dark:hover:text-slate-300 select-none">
-              Saisir manuellement les coordonnées GPS (avancé)
-            </summary>
-            <div className="grid grid-cols-2 gap-3 mt-3">
-              <Field label="Latitude">
-                <input value={lat} onChange={(e) => setLat(e.target.value)} type="number" step="any" placeholder="12.3714" className={inputCls} />
-              </Field>
-              <Field label="Longitude">
-                <input value={lng} onChange={(e) => setLng(e.target.value)} type="number" step="any" placeholder="-1.5197" className={inputCls} />
-              </Field>
-            </div>
-            <p className="text-[10px] text-slate-400 mt-2">
-              Renseigner ces champs forcera ces valeurs et désactivera le géocodage automatique.
-            </p>
-          </details>
           <Field label="Fuseau horaire">
             <input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Africa/Ouagadougou" className={inputCls} />
           </Field>
