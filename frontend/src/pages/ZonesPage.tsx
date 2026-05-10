@@ -396,8 +396,9 @@ function AddMenu({ open, onToggle, onClose, onPick, existingKinds }: {
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-10" onClick={onClose} />
-          <div className="absolute right-0 top-full mt-1 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-2xl py-1 z-20">
+          {/* z-[1100] pour passer au-dessus des contrôles Leaflet (z-index 800-1000) */}
+          <div className="fixed inset-0 z-[1090]" onClick={onClose} />
+          <div className="absolute right-0 top-full mt-1 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-2xl py-1 z-[1100]">
             {KIND_ORDER.map((k) => {
               const m = KIND_META[k];
               // Possible si on peut être à la racine OU s'il existe au moins
@@ -516,8 +517,8 @@ function ZoneNode({ node, depth, canWrite, devicesByZone, onAddChild, onAddDevic
             </button>
             {menuOpen && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-2xl py-1 z-20">
+                <div className="fixed inset-0 z-[1090]" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-2xl py-1 z-[1100]">
                   {(() => {
                     const allowed = kindsAllowedUnder(node.zone.kind);
                     if (allowed.length === 0) return null;
