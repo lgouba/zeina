@@ -200,11 +200,22 @@ function DrawControl({ onPolygonDrawn }: { onPolygonDrawn: (gj: object) => void 
     });
     map.addControl(drawControl);
 
+    // Active automatiquement l'outil polygone — l'utilisateur peut directement
+    // cliquer sur la carte pour poser des sommets, sans devoir cliquer
+    // d'abord sur l'icône pentagone de la barre d'outils. Plus intuitif
+    // quand on arrive ici depuis "Ajouter une zone" en mode Carte.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const polygonDraw = new (L as any).Draw.Polygon(map, drawControl.options.draw.polygon);
+    polygonDraw.enable();
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onCreated = (e: any) => {
       fg.clearLayers(); // une seule géométrie par zone
       fg.addLayer(e.layer);
       onPolygonDrawn(e.layer.toGeoJSON().geometry);
+      // Réactive l'outil pour que l'utilisateur puisse tracer à nouveau s'il
+      // se trompe (chaque tracé écrase le précédent).
+      polygonDraw.enable();
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onEdited = (e: any) => {
@@ -217,6 +228,7 @@ function DrawControl({ onPolygonDrawn }: { onPolygonDrawn: (gj: object) => void 
     map.on("draw:created", onCreated);
     map.on("draw:edited", onEdited);
     return () => {
+      polygonDraw.disable();
       map.off("draw:created", onCreated);
       map.off("draw:edited", onEdited);
       map.removeControl(drawControl);
