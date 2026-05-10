@@ -72,23 +72,20 @@ export function SitesHome() {
         <div className="zeina-blob absolute top-10 right-1/3 w-72 h-72 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none"
           style={{ animationDelay: "12s" }} />
 
-        <div className="relative px-8 pt-10 pb-8">
-          <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="relative px-8 pt-6 pb-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400 font-semibold mb-2">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400 font-semibold mb-1">
                 Hyperviseur ZEINA
               </p>
-              <h1 className="text-4xl lg:text-5xl font-bold tracking-tight bg-gradient-to-br from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+              <h1 className="text-2xl lg:text-3xl font-bold tracking-tight bg-gradient-to-br from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
                 Bonjour {user?.full_name?.split(" ")[0] || user?.email?.split("@")[0]}
               </h1>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 max-w-xl">
-                Pilotez l'ensemble de vos sites depuis une vue unique. Cliquez sur un site pour accéder à ses tableaux de bord.
-              </p>
             </div>
 
             {isAdmin && (
               <button onClick={() => setCreating(true)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-br from-brand-500 to-cyan-500 hover:from-brand-400 hover:to-cyan-400 text-white text-sm font-medium shadow-lg shadow-brand-500/30 hover:shadow-xl hover:shadow-brand-500/40 transition">
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-br from-brand-500 to-cyan-500 hover:from-brand-400 hover:to-cyan-400 text-white text-sm font-medium shadow-lg shadow-brand-500/30 hover:shadow-xl hover:shadow-brand-500/40 transition">
                 <Plus className="h-4 w-4" /> Nouveau site
               </button>
             )}
@@ -96,7 +93,7 @@ export function SitesHome() {
 
           {/* Bande de stats globales */}
           {sites.length > 0 && (
-            <div className="mt-8 grid grid-cols-2 lg:grid-cols-4 gap-3 max-w-3xl">
+            <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-2 max-w-3xl">
               <GlobalStat icon={<Building2 className="h-4 w-4" />} label="Sites"        value={sites.length}      color="indigo" />
               <GlobalStat icon={<Cpu className="h-4 w-4" />}       label="Équipements" value={totals.devices}    color="cyan" />
               <GlobalStat icon={<Sparkles className="h-4 w-4" />}  label="Règles"      value={totals.rules}      color="emerald" />
@@ -106,7 +103,7 @@ export function SitesHome() {
         </div>
       </div>
 
-      <div className="p-8">
+      <div className="px-8 pt-4 pb-8">
         {loading ? (
           <div className="text-sm text-slate-500 dark:text-slate-400">Chargement…</div>
         ) : sites.length === 0 ? (
@@ -199,12 +196,12 @@ function GlobalStat({ icon, label, value, color }: {
     slate:   "from-slate-500/10 to-slate-500/5 text-slate-600 dark:text-slate-300 border-slate-500/20",
   };
   return (
-    <div className={`relative rounded-xl border bg-gradient-to-br ${colorMap[color]} backdrop-blur-sm px-4 py-3`}>
-      <div className="flex items-center gap-2">
+    <div className={`relative rounded-xl border bg-gradient-to-br ${colorMap[color]} backdrop-blur-sm px-4 py-2 flex items-center justify-between gap-3`}>
+      <div className="flex items-center gap-2 min-w-0">
         {icon}
-        <span className="text-[11px] uppercase tracking-wider font-semibold opacity-80">{label}</span>
+        <span className="text-[11px] uppercase tracking-wider font-semibold opacity-80 truncate">{label}</span>
       </div>
-      <div className="text-3xl font-bold tabular-nums mt-1 text-slate-900 dark:text-white">{value}</div>
+      <div className="text-xl font-bold tabular-nums text-slate-900 dark:text-white shrink-0">{value}</div>
     </div>
   );
 }

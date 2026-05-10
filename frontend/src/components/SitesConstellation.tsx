@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Building2 } from "lucide-react";
+import { Building2, Maximize2, Minimize2 } from "lucide-react";
 import clsx from "clsx";
 import type { Site, SiteSummary } from "../types/api";
 
@@ -25,16 +25,34 @@ export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 1200, h: height });
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Suit la largeur du container pour adapter le layout en responsive.
+  // Suit la taille du container (largeur + hauteur) pour adapter le layout :
+  // en mode plein écran le navigateur écrase la hauteur à 100vh, on doit
+  // détecter ça pour repositionner les orbes.
   useEffect(() => {
     if (!containerRef.current) return;
     const ro = new ResizeObserver(([e]) => {
-      setSize({ w: e.contentRect.width, h: height });
+      setSize({ w: e.contentRect.width, h: e.contentRect.height });
     });
     ro.observe(containerRef.current);
     return () => ro.disconnect();
-  }, [height]);
+  }, []);
+
+  // Sync l'état plein écran avec l'API native (Échap, F11, etc.).
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      containerRef.current?.requestFullscreen().catch(() => {});
+    }
+  };
 
   const positions = useMemo(() => computePositions(sites, size.w, size.h), [sites, size]);
   const stars = useMemo(() => generateStars(60, size.w, size.h), [size]);
@@ -136,6 +154,14 @@ export function SitesConstellation({ sites, summaries, height = 560 }: Props) {
           </div>
         </div>
       </div>
+
+      {/* Bouton plein écran, top-right */}
+      <button
+        onClick={toggleFullscreen}
+        title={isFullscreen ? "Quitter le plein écran (Échap)" : "Afficher en plein écran"}
+        className="absolute top-4 right-4 z-10 p-2 rounded-lg bg-slate-900/70 backdrop-blur-md border border-cyan-500/20 text-cyan-300/80 hover:text-white hover:border-cyan-400/50 shadow-2xl transition">
+        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+      </button>
     </div>
   );
 }
