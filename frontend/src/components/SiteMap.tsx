@@ -6,6 +6,7 @@ import L, { type LatLngBoundsExpression, type LatLngTuple } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw";
 import "leaflet-draw/dist/leaflet.draw.css";
+import { useNavigate, useParams } from "react-router-dom";
 import type { DeviceListItem, Site, Zone, ZoneKind } from "../types/api";
 
 // ---------------------------------------------------------------------------
@@ -91,10 +92,10 @@ export function SiteMap({ site, zones, devices = [], height = 480, drawingZoneID
           />
         ))}
 
-        {/* Marqueurs des équipements (utilise le lat/lng du site comme défaut
-            tant qu'on n'a pas de geometry par device) */}
+        {/* Clusters d'équipements regroupés par zone. Un seul badge cliquable
+            par zone au lieu de N pins empilés au même endroit. */}
         {devices.length > 0 && site.lat != null && site.lng != null && (
-          <DeviceClusterMarkers devices={devices} fallback={[site.lat, site.lng]} />
+          <DeviceZoneClusters devices={devices} zones={zones} fallback={[site.lat, site.lng]} />
         )}
 
         {/* Auto-fit sur la bbox des polygones + site */}
@@ -110,11 +111,15 @@ export function SiteMap({ site, zones, devices = [], height = 480, drawingZoneID
 }
 
 // ---------------------------------------------------------------------------
-// AutoFitBounds — recalcule la vue pour englober toutes les géométries.
+// AutoFitBounds — cadre la vue UNE SEULE FOIS sur les géométries au mount.
+// Une fois fait, on laisse l'utilisateur naviguer / zoomer librement sans
+// reset à chaque re-render parent (changement de zones, refresh d'état, etc.).
 // ---------------------------------------------------------------------------
 function AutoFitBounds({ zones, site }: { zones: Zone[]; site: Site }) {
   const map = useMap();
+  const fittedRef = useRef(false);
   useEffect(() => {
+    if (fittedRef.current) return;
     const layers: L.Layer[] = [];
     for (const z of zones) {
       if (z.geometry) {
@@ -128,38 +133,98 @@ function AutoFitBounds({ zones, site }: { zones: Zone[]; site: Site }) {
       const b = group.getBounds();
       if (b.isValid()) {
         map.fitBounds(b as LatLngBoundsExpression, { padding: [40, 40], maxZoom: 19 });
+        fittedRef.current = true;
         return;
       }
     }
     if (site.lat != null && site.lng != null) {
       map.setView([site.lat, site.lng], 17);
+      fittedRef.current = true;
     }
   }, [zones, site.lat, site.lng, map]);
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// DeviceClusterMarkers — petits marqueurs pour chaque équipement. À la racine,
-// on les place tous sur le centroid du site (pas de lat/lng par device pour
-// l'instant — ça viendra avec un futur champ devices.geometry).
+// DeviceZoneClusters — groupe les équipements par zone et affiche UN badge
+// cliquable par zone au lieu de N pins empilés. Le badge montre le nombre
+// d'équipements dans la zone, son popup liste tous les devices avec leur
+// statut et un lien vers leur fiche.
 // ---------------------------------------------------------------------------
-function DeviceClusterMarkers({ devices, fallback }: { devices: DeviceListItem[]; fallback: LatLngTuple }) {
-  // Léger jitter circulaire pour ne pas tous superposer les marqueurs au
-  // même point quand ils n'ont pas de coordonnées propres.
+function DeviceZoneClusters({ devices, zones, fallback }: {
+  devices: DeviceListItem[]; zones: Zone[]; fallback: LatLngTuple;
+}) {
+  const navigate = useNavigate();
+  const { id: siteId } = useParams<{ id: string }>();
+
+  // Index des zones pour récupérer la geometry rapidement.
+  const zoneByID = useMemo(() => {
+    const m = new Map<string, Zone>();
+    for (const z of zones) m.set(z.id, z);
+    return m;
+  }, [zones]);
+
+  // Groupe les devices par zone_id.
+  const groups = useMemo(() => {
+    const m = new Map<string, DeviceListItem[]>();
+    for (const d of devices) {
+      const arr = m.get(d.zone_id) || [];
+      arr.push(d);
+      m.set(d.zone_id, arr);
+    }
+    return m;
+  }, [devices]);
+
   return (
     <>
-      {devices.map((d, i) => {
-        const angle = (i / devices.length) * 2 * Math.PI;
-        const r = 0.00012; // ~13 m
-        const lat = fallback[0] + r * Math.cos(angle);
-        const lng = fallback[1] + r * Math.sin(angle);
+      {Array.from(groups.entries()).map(([zoneID, devs], idx) => {
+        // Position du badge : centroïde de la zone si polygone tracé, sinon
+        // léger offset autour du centre du site pour ne pas superposer les
+        // clusters de plusieurs zones non géolocalisées.
+        const z = zoneByID.get(zoneID);
+        let pos: LatLngTuple = fallback;
+        const centroid = z?.geometry ? polygonCentroid(z.geometry) : null;
+        if (centroid) {
+          pos = centroid;
+        } else {
+          const angle = (idx / Math.max(groups.size, 1)) * 2 * Math.PI;
+          const r = 0.0005; // ~55 m
+          pos = [fallback[0] + r * Math.cos(angle), fallback[1] + r * Math.sin(angle)];
+        }
+
+        const icon = L.divIcon({
+          className: "zeina-device-cluster",
+          html: `
+            <div class="zeina-cluster-pin">
+              <span class="zeina-cluster-count">${devs.length}</span>
+              <span class="zeina-cluster-label">${escapeHtml(z?.name || "Sans zone")}</span>
+            </div>
+          `,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        });
+
         return (
-          <Marker key={d.id} position={[lat, lng]}>
+          <Marker key={zoneID} position={pos} icon={icon}>
             <Popup>
-              <div className="text-xs">
-                <div className="font-semibold">{d.name || d.slug}</div>
-                <div className="text-slate-500">{d.zone_name} · {d.type}</div>
-                <div className="text-slate-400 text-[10px] mt-1">{d.status}</div>
+              <div className="text-xs space-y-1.5 min-w-[200px]">
+                <div className="font-semibold text-sm">{z?.name || "Sans zone"}</div>
+                <div className="text-slate-500">{devs.length} équipement{devs.length > 1 ? "s" : ""}</div>
+                <div className="border-t border-slate-200 pt-1.5 space-y-1 max-h-48 overflow-auto">
+                  {devs.map((d) => (
+                    <button key={d.id}
+                      onClick={() => navigate(`/sites/${siteId}/devices/${d.id}`)}
+                      className="w-full text-left flex items-center gap-2 px-1.5 py-1 rounded hover:bg-slate-100">
+                      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                        d.status === "online" ? "bg-emerald-500"
+                        : d.status === "offline" ? "bg-red-500"
+                        : "bg-amber-500"
+                      }`} />
+                      <span className="flex-1 truncate font-medium">{d.name || d.slug}</span>
+                      <span className="text-[10px] text-slate-400">{d.type}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </Popup>
           </Marker>
@@ -167,6 +232,31 @@ function DeviceClusterMarkers({ devices, fallback }: { devices: DeviceListItem[]
       })}
     </>
   );
+}
+
+// polygonCentroid — moyenne des sommets de l'anneau extérieur. Suffit pour
+// positionner un badge au milieu d'une zone, pas besoin du vrai centroïde
+// géométrique.
+function polygonCentroid(geom: unknown): LatLngTuple | null {
+  if (!geom || typeof geom !== "object") return null;
+  const g = geom as { type?: string; coordinates?: unknown };
+  let ring: number[][] | null = null;
+  if (g.type === "Polygon" && Array.isArray(g.coordinates)) {
+    ring = (g.coordinates as number[][][])[0] || null;
+  } else if (g.type === "MultiPolygon" && Array.isArray(g.coordinates)) {
+    ring = (g.coordinates as number[][][][])[0]?.[0] || null;
+  }
+  if (!ring || ring.length === 0) return null;
+  let cx = 0, cy = 0;
+  for (const p of ring) { cx += p[0]; cy += p[1]; }
+  cx /= ring.length; cy /= ring.length;
+  return [cy, cx]; // Leaflet veut [lat, lng], GeoJSON donne [lng, lat]
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] || c
+  ));
 }
 
 // ---------------------------------------------------------------------------

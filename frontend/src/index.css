@@ -89,6 +89,53 @@ textarea.bg-slate-950, textarea.bg-slate-900, textarea.bg-slate-800 {
   animation: zeina-blob 18s ease-in-out infinite;
 }
 
+/* SiteMap : marker cluster d'équipements par zone (DivIcon Leaflet) */
+.zeina-device-cluster {
+  background: transparent !important;
+  border: 0 !important;
+}
+.zeina-cluster-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  background: linear-gradient(135deg, #6366f1, #06b6d4);
+  color: #fff;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.35);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 150ms ease;
+}
+.dark .zeina-cluster-pin {
+  border-color: #0f172a;
+}
+.zeina-cluster-pin:hover {
+  transform: translate(-50%, -50%) scale(1.05);
+}
+.zeina-cluster-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  tabular-nums: true;
+}
+.zeina-cluster-label {
+  font-size: 11px;
+  letter-spacing: -0.01em;
+}
+
 /* Constellation : étoiles scintillantes + lignes de connexion animées */
 @keyframes zeina-twinkle {
   0%, 100% { opacity: 0.2; }
